@@ -1,0 +1,209 @@
+//! Native Git repository inspection, staging, committing, and push operations.
+
+use crate::error::{DaemonError, Result};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use tokio::process::Command;
+use tracing::{debug, info};
+
+/// Status of an individual tracked or untracked file in the repository.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitFileStatus {
+    pub path: String,
+    pub status: String,
+    pub staged: bool,
+    pub insertions: usize,
+    pub deletions: usize,
+}
+
+/// Comprehensive repository status summary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitStatusResult {
+    pub branch: String,
+    pub clean: bool,
+    pub ahead: usize,
+    pub behind: usize,
+    pub files: Vec<GitFileStatus>,
+}
+
+/// Result of a file diff query.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitDiffResult {
+    pub path: String,
+    pub diff: String,
+    pub insertions: usize,
+    pub deletions: usize,
+}
+
+/// Result of a commit operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitCommitResult {
+    pub commit_hash: String,
+    pub branch: String,
+    pub summary: String,
+}
+
+/// Git operational engine executing asynchronous commands within the workspace root.
+#[derive(Clone, Debug)]
+pub struct GitEngine {
+    workspace_root: PathBuf,
+}
+
+impl GitEngine {
+    /// Initializes a GitEngine anchored at `workspace_root`.
+    pub fn new(workspace_root: PathBuf) -> Self {
+        Self { workspace_root }
+    }
+
+    /// Helper to execute a git command in the repository workspace.
+    async fn run_git(&self, args: &[&str]) -> Result<String> {
+        debug!("Executing git {:?}", args);
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&self.workspace_root)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(DaemonError::Git(format!(
+                "git {} failed: {}",
+                args.join(" "),
+                stderr.trim()
+            )));
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    /// Retrieves current Git branch name.
+    pub async fn current_branch(&self) -> Result<String> {
+        let out = self.run_git(&["rev-parse", "--abbrev-ref", "HEAD"]).await?;
+        Ok(out.trim().to_string())
+    }
+
+    /// Returns detailed repository status including modified, staged, and untracked files.
+    pub async fn status(&self) -> Result<GitStatusResult> {
+        let branch = self.current_branch().await.unwrap_or_else(|_| "HEAD".to_string());
+        let raw_status = self.run_git(&["status", "--porcelain=v1"]).await?;
+
+        let mut files = Vec::new();
+        for line in raw_status.lines() {
+            if line.len() < 3 {
+                continue;
+            }
+            let index_status = line.chars().nth(0).unwrap_or(' ');
+            let worktree_status = line.chars().nth(1).unwrap_or(' ');
+            let file_path = line[3..].trim().to_string();
+
+            let staged = index_status != ' ' && index_status != '?';
+            let status_label = match (index_status, worktree_status) {
+                ('?', '?') => "untracked",
+                ('A', _) | (_, 'A') => "new",
+                ('M', _) | (_, 'M') => "modified",
+                ('D', _) | (_, 'D') => "deleted",
+                ('R', _) | (_, 'R') => "renamed",
+                ('U', _) | (_, 'U') => "conflict",
+                _ => "modified",
+            };
+
+            files.push(GitFileStatus {
+                path: file_path,
+                status: status_label.to_string(),
+                staged,
+                insertions: 0,
+                deletions: 0,
+            });
+        }
+
+        let is_clean = files.is_empty();
+
+        Ok(GitStatusResult {
+            branch,
+            clean: is_clean,
+            ahead: 0,
+            behind: 0,
+            files,
+        })
+    }
+
+    /// Returns unified diff content for a specific file or the entire repository.
+    pub async fn diff(&self, path: Option<&str>, staged: bool) -> Result<GitDiffResult> {
+        let mut args = vec!["diff"];
+        if staged {
+            args.push("--cached");
+        }
+        if let Some(p) = path {
+            args.push("--");
+            args.push(p);
+        }
+
+        let raw_diff = self.run_git(&args).await?;
+
+        let mut insertions = 0;
+        let mut deletions = 0;
+        for line in raw_diff.lines() {
+            if line.starts_with('+') && !line.starts_with("+++") {
+                insertions += 1;
+            } else if line.starts_with('-') && !line.starts_with("---") {
+                deletions += 1;
+            }
+        }
+
+        Ok(GitDiffResult {
+            path: path.unwrap_or("all").to_string(),
+            diff: raw_diff,
+            insertions,
+            deletions,
+        })
+    }
+
+    /// Stages specific file paths (`git add <path>`).
+    pub async fn stage(&self, paths: &[String]) -> Result<()> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+        let mut args = vec!["add", "--"];
+        let str_paths: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
+        args.extend(str_paths);
+
+        self.run_git(&args).await?;
+        info!("Staged {} files", paths.len());
+        Ok(())
+    }
+
+    /// Commits changes with a user-supplied message, optionally staging all changes beforehand.
+    pub async fn commit(&self, message: &str, stage_all: bool) -> Result<GitCommitResult> {
+        if stage_all {
+            self.run_git(&["add", "-A"]).await?;
+        }
+
+        self.run_git(&["commit", "-m", message]).await?;
+
+        let hash_raw = self.run_git(&["rev-parse", "--short", "HEAD"]).await?;
+        let branch = self.current_branch().await.unwrap_or_else(|_| "HEAD".to_string());
+
+        let commit_hash = hash_raw.trim().to_string();
+        info!("Created commit {} on branch {}", commit_hash, branch);
+
+        Ok(GitCommitResult {
+            commit_hash,
+            branch,
+            summary: message.to_string(),
+        })
+    }
+
+    /// Pushes committed changes to the upstream remote repository.
+    pub async fn push(&self, remote: Option<&str>, branch: Option<&str>) -> Result<String> {
+        let current = self.current_branch().await.unwrap_or_else(|_| "main".to_string());
+        let target_branch = branch.unwrap_or(&current);
+        let target_remote = remote.unwrap_or("origin");
+
+        info!("Pushing branch {} to remote {}", target_branch, target_remote);
+        let out = self.run_git(&["push", target_remote, target_branch]).await?;
+        Ok(out)
+    }
+}
