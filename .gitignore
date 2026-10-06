@@ -1,0 +1,42 @@
+# Root Git Ignore for Zed Remote
+
+# Build Artifacts (Rust / Cargo)
+daemon/target/
+**/target/
+**/*.rs.bk
+Cargo.lock
+
+# Build Artifacts (Flutter / Dart)
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/.packages
+app/build/
+app/ios/Flutter/Generated.xcconfig
+app/ios/Flutter/flutter_export_environment.sh
+app/ios/ServiceDefinitions.json
+app/ios/Runner/GeneratedPluginRegistrant.h
+app/ios/Runner/GeneratedPluginRegistrant.m
+app/android/gradle/
+app/android/gradlew
+app/android/gradlew.bat
+app/android/local.properties
+app/android/app/build/
+**/*.pub-cache/
+
+# Runtime / Session Logs & Secret Keys
+*.log
+.zed-remote/sessions/
+*.jsonl
+*.key
+*.pem
+*.token
+.env
+.env.local
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
