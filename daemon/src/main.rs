@@ -18,6 +18,7 @@ use zed_remote_daemon::proxy::{AgentSubprocess, MessageRouter};
 use zed_remote_daemon::security::SecurityGuard;
 use zed_remote_daemon::session::SessionManager;
 use zed_remote_daemon::telemetry::TelemetryCollector;
+use zed_remote_daemon::terminal::TerminalManager;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -45,6 +46,7 @@ async fn main() -> anyhow::Result<()> {
     let security = SecurityGuard::new(workspace_root.clone(), config.blocked_commands.clone());
     let git = GitEngine::new(workspace_root.clone());
     let telemetry = Arc::new(TelemetryCollector::new());
+    let terminal = Arc::new(TerminalManager::new(workspace_root.clone(), security.clone()));
     let auth = AuthValidator::new(token);
 
     // Spawn child agent process
@@ -115,6 +117,7 @@ async fn main() -> anyhow::Result<()> {
         session_manager,
         git,
         telemetry,
+        terminal,
     );
 
     tokio::spawn(async move {

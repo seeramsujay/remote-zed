@@ -7,10 +7,13 @@ import 'services/agent_service.dart';
 import 'services/bunker_tunnel_service.dart';
 import 'services/git_service.dart';
 import 'services/telemetry_service.dart';
+import 'services/terminal_service.dart';
 import 'services/websocket_client.dart';
 import 'state/agent_state.dart';
+import 'state/file_system_state.dart';
 import 'state/git_state.dart';
 import 'state/telemetry_state.dart';
+import 'state/terminal_state.dart';
 import 'ui/screens/home_screen.dart';
 
 void main() {
@@ -29,6 +32,7 @@ void main() {
   final agentService = AgentService(client: wsClient);
   final gitService = GitService(client: wsClient);
   final telemetryService = TelemetryService(client: wsClient);
+  final terminalService = TerminalService(client: wsClient);
   final bunkerService = BunkerTunnelService(webSocketClient: wsClient);
 
   runApp(
@@ -42,6 +46,12 @@ void main() {
         ),
         ChangeNotifierProvider(
           create: (_) => TelemetryState(telemetryService: telemetryService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => TerminalState(terminalService: terminalService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => FileSystemState(terminalService: terminalService),
         ),
       ],
       child: ZedRemoteApp(

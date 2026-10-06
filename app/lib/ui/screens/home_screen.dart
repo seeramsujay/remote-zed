@@ -5,12 +5,14 @@ import '../../services/bunker_tunnel_service.dart';
 import '../../services/websocket_client.dart';
 import '../../state/agent_state.dart';
 import '../widgets/agent_panel.dart';
+import '../widgets/file_explorer_panel.dart';
 import '../widgets/permission_dialog.dart';
 import '../widgets/repository_panel.dart';
 import '../widgets/telemetry_bar.dart';
+import '../widgets/terminal_panel.dart';
 import 'settings_sheet.dart';
 
-/// Main container screen supporting adaptive dual-panel and mobile tabbed layouts.
+/// Main container screen supporting adaptive dual-panel and mobile 4-tab views.
 class HomeScreen extends StatefulWidget {
   final WebSocketClient client;
   final BunkerTunnelService bunkerService;
@@ -117,15 +119,33 @@ class _HomeScreenState extends State<HomeScreen> {
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final isWideScreen = constraints.maxWidth >= 800;
+                  final isWideScreen = constraints.maxWidth >= 900;
 
                   if (isWideScreen) {
                     // Dual Panel Layout for Tablets & Foldables
-                    return const Row(
+                    return Row(
                       children: [
-                        Expanded(flex: 3, child: AgentPanel()),
-                        VerticalDivider(width: 1, color: AppTheme.border),
-                        Expanded(flex: 2, child: RepositoryPanel()),
+                        Expanded(
+                          flex: 3,
+                          child: IndexedStack(
+                            index: _currentTabIndex == 1 ? 1 : 0,
+                            children: const [
+                              AgentPanel(),
+                              TerminalPanel(),
+                            ],
+                          ),
+                        ),
+                        const VerticalDivider(width: 1, color: AppTheme.border),
+                        Expanded(
+                          flex: 2,
+                          child: IndexedStack(
+                            index: _currentTabIndex == 2 ? 0 : 1,
+                            children: const [
+                              FileExplorerPanel(),
+                              RepositoryPanel(),
+                            ],
+                          ),
+                        ),
                       ],
                     );
                   } else {
@@ -134,6 +154,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       index: _currentTabIndex,
                       children: const [
                         AgentPanel(),
+                        TerminalPanel(),
+                        FileExplorerPanel(),
                         RepositoryPanel(),
                       ],
                     );
@@ -144,27 +166,38 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-      bottomNavigationBar: MediaQuery.of(context).size.width >= 800
-          ? null
-          : BottomNavigationBar(
-              currentIndex: _currentTabIndex,
-              backgroundColor: AppTheme.surface,
-              selectedItemColor: AppTheme.primaryAccent,
-              unselectedItemColor: AppTheme.textSecondary,
-              onTap: (index) => setState(() => _currentTabIndex = index),
-              items: const [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.chat_bubble_outline),
-                  activeIcon: Icon(Icons.chat_bubble),
-                  label: 'Agent Chat',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.commit_outlined),
-                  activeIcon: Icon(Icons.commit),
-                  label: 'Repository',
-                ),
-              ],
-            ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentTabIndex,
+        type: BottomNavigationBarType.fixed,
+        backgroundColor: AppTheme.surface,
+        selectedItemColor: AppTheme.primaryAccent,
+        unselectedItemColor: AppTheme.textSecondary,
+        selectedFontSize: 11,
+        unselectedFontSize: 11,
+        onTap: (index) => setState(() => _currentTabIndex = index),
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.chat_bubble_outline),
+            activeIcon: Icon(Icons.chat_bubble),
+            label: 'Agent',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.terminal_outlined),
+            activeIcon: Icon(Icons.terminal),
+            label: 'Terminal',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.folder_outlined),
+            activeIcon: Icon(Icons.folder),
+            label: 'Files',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.commit_outlined),
+            activeIcon: Icon(Icons.commit),
+            label: 'Git',
+          ),
+        ],
+      ),
     );
   }
 

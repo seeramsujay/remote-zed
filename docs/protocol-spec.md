@@ -2,7 +2,7 @@
 
 Zed Remote operates over two integrated protocol layers:
 1. **Agent Client Protocol (ACP)**: Standardized JSON-RPC 2.0 messages exchanged between Zed, the daemon proxy, and the target agent.
-2. **Zed Remote Extension RPC**: Daemon management endpoints for Git, session replay, and host telemetry.
+2. **Zed Remote Extension RPC**: Daemon management endpoints for Git, interactive terminal, filesystem browsing, session replay, and host telemetry.
 
 ---
 
@@ -185,6 +185,80 @@ Pushes committed changes to configured remote.
   "params": {
     "remote": "origin",
     "branch": "main"
+  }
+}
+```
+
+### `/terminal/exec` (Request)
+
+Executes an interactive shell command within the active directory buffer.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 601,
+  "method": "terminal/exec",
+  "params": {
+    "command": "mkdir -p my-new-project && cd my-new-project"
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 601,
+  "result": {
+    "stdout": "",
+    "stderr": "",
+    "exit_code": 0,
+    "cwd": "/home/username/Projects/my-new-project"
+  }
+}
+```
+
+### `/fs/list` (Request)
+
+Lists files and directories for a given path.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 602,
+  "method": "fs/list",
+  "params": {
+    "path": "/home/username/Projects"
+  }
+}
+```
+
+### `/fs/mkdir` (Request)
+
+Creates a directory on the host filesystem.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 603,
+  "method": "fs/mkdir",
+  "params": {
+    "path": "my-app"
+  }
+}
+```
+
+### `/workspace/set` (Request)
+
+Switches the active workspace directory for AI Agent and Git tracking.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 604,
+  "method": "workspace/set",
+  "params": {
+    "path": "/home/username/Projects/my-app"
   }
 }
 ```

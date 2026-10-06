@@ -1,4 +1,4 @@
-//! Asynchronous WebSocket server managing mobile client connections and extension RPCs.
+//! Asynchronous WebSocket server managing mobile client connections, terminal, and extension RPCs.
 
 use crate::error::Result;
 use crate::gateway::auth::AuthValidator;
@@ -7,6 +7,7 @@ use crate::protocol::{error_codes, JsonRpcMessage, JsonRpcRequest, JsonRpcRespon
 use crate::proxy::MessageRouter;
 use crate::session::SessionManager;
 use crate::telemetry::{PowerAction, TelemetryCollector};
+use crate::terminal::TerminalManager;
 use futures_util::{SinkExt, StreamExt};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::accept_hdr_async;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Orchestrates the mobile WebSocket gateway.
 pub struct WebSocketGateway {
@@ -24,6 +25,7 @@ pub struct WebSocketGateway {
     session_manager: SessionManager,
     git: GitEngine,
     telemetry: Arc<TelemetryCollector>,
+    terminal: Arc<TerminalManager>,
 }
 
 impl WebSocketGateway {
@@ -35,6 +37,7 @@ impl WebSocketGateway {
         session_manager: SessionManager,
         git: GitEngine,
         telemetry: Arc<TelemetryCollector>,
+        terminal: Arc<TerminalManager>,
     ) -> Self {
         Self {
             bind_addr,
@@ -43,6 +46,7 @@ impl WebSocketGateway {
             session_manager,
             git,
             telemetry,
+            terminal,
         }
     }
 
@@ -60,6 +64,7 @@ impl WebSocketGateway {
                     let session_manager = self.session_manager.clone();
                     let git = self.git.clone();
                     let telemetry = Arc::clone(&self.telemetry);
+                    let terminal = Arc::clone(&self.terminal);
 
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_connection(
@@ -70,6 +75,7 @@ impl WebSocketGateway {
                             session_manager,
                             git,
                             telemetry,
+                            terminal,
                         )
                         .await
                         {
@@ -93,6 +99,7 @@ impl WebSocketGateway {
         session_manager: SessionManager,
         git: GitEngine,
         telemetry: Arc<TelemetryCollector>,
+        terminal: Arc<TerminalManager>,
     ) -> Result<()> {
         let mut authenticated = false;
 
@@ -149,13 +156,14 @@ impl WebSocketGateway {
         while let Some(msg_res) = ws_receiver.next().await {
             match msg_res {
                 Ok(Message::Text(text)) => {
-                    // Check if it's an extension endpoint (git, telemetry, session/load)
+                    // Check if it's an extension endpoint (git, telemetry, terminal, fs, session/load)
                     if let Ok(JsonRpcMessage::Request(req)) = JsonRpcMessage::parse(&text) {
                         if let Some(extension_resp) = Self::handle_extension_rpc(
                             &req,
                             &session_manager,
                             &git,
                             &telemetry,
+                            &terminal,
                         )
                         .await
                         {
@@ -187,14 +195,105 @@ impl WebSocketGateway {
         Ok(())
     }
 
-    /// Handles Zed Remote extension JSON-RPC requests (`git/*`, `system/*`, `session/load`).
+    /// Handles Zed Remote extension JSON-RPC requests (`git/*`, `system/*`, `terminal/*`, `fs/*`, `session/load`).
     async fn handle_extension_rpc(
         req: &JsonRpcRequest,
         session_manager: &SessionManager,
         git: &GitEngine,
         telemetry: &TelemetryCollector,
+        terminal: &TerminalManager,
     ) -> Option<String> {
         match req.method.as_str() {
+            "terminal/exec" => {
+                let command = req.params.get("command").and_then(|v| v.as_str()).unwrap_or("");
+                match terminal.exec(command).await {
+                    Ok(result) => Some(
+                        serde_json::to_string(&JsonRpcResponse::success(
+                            req.id.clone(),
+                            serde_json::to_value(result).unwrap_or_default(),
+                        ))
+                        .unwrap_or_default(),
+                    ),
+                    Err(e) => Some(
+                        serde_json::to_string(&JsonRpcResponse::error(
+                            req.id.clone(),
+                            error_codes::INTERNAL_ERROR,
+                            format!("Terminal execution error: {}", e),
+                        ))
+                        .unwrap_or_default(),
+                    ),
+                }
+            }
+            "terminal/cwd" => {
+                let cwd = terminal.get_cwd().await;
+                Some(
+                    serde_json::to_string(&JsonRpcResponse::success(
+                        req.id.clone(),
+                        serde_json::json!({ "cwd": cwd }),
+                    ))
+                    .unwrap_or_default(),
+                )
+            }
+            "fs/list" => {
+                let path_opt = req.params.get("path").and_then(|v| v.as_str());
+                match terminal.list_directory(path_opt).await {
+                    Ok(result) => Some(
+                        serde_json::to_string(&JsonRpcResponse::success(
+                            req.id.clone(),
+                            serde_json::to_value(result).unwrap_or_default(),
+                        ))
+                        .unwrap_or_default(),
+                    ),
+                    Err(e) => Some(
+                        serde_json::to_string(&JsonRpcResponse::error(
+                            req.id.clone(),
+                            error_codes::INTERNAL_ERROR,
+                            format!("Failed to list directory: {}", e),
+                        ))
+                        .unwrap_or_default(),
+                    ),
+                }
+            }
+            "fs/mkdir" => {
+                let path_str = req.params.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                match terminal.create_directory(path_str).await {
+                    Ok(created_path) => Some(
+                        serde_json::to_string(&JsonRpcResponse::success(
+                            req.id.clone(),
+                            serde_json::json!({ "created": true, "path": created_path }),
+                        ))
+                        .unwrap_or_default(),
+                    ),
+                    Err(e) => Some(
+                        serde_json::to_string(&JsonRpcResponse::error(
+                            req.id.clone(),
+                            error_codes::INTERNAL_ERROR,
+                            format!("Failed to create directory: {}", e),
+                        ))
+                        .unwrap_or_default(),
+                    ),
+                }
+            }
+            "workspace/set" => {
+                let path_str = req.params.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                match terminal.set_cwd(std::path::Path::new(path_str)).await {
+                    Ok(new_path) => Some(
+                        serde_json::to_string(&JsonRpcResponse::success(
+                            req.id.clone(),
+                            serde_json::json!({ "workspace": new_path }),
+                        ))
+                        .unwrap_or_default(),
+                    ),
+                    Err(e) => Some(
+                        serde_json::to_string(&JsonRpcResponse::error(
+                            req.id.clone(),
+                            error_codes::INTERNAL_ERROR,
+                            format!("Failed to set workspace: {}", e),
+                        ))
+                        .unwrap_or_default(),
+                    ),
+                }
+            }
             "session/load" => {
                 let session_id = req.params.get("sessionId").and_then(|v| v.as_str()).unwrap_or("default");
                 let from_seq = req.params.get("fromSequence").and_then(|v| v.as_u64()).unwrap_or(0);

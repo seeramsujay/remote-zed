@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ZedRemoteTerminalProtocol",
+  "description": "JSON-RPC 2.0 schemas for interactive terminal execution and remote filesystem operations",
+  "definitions": {
+    "TerminalExecParams": {
+      "type": "object",
+      "required": ["command"],
+      "properties": {
+        "command": { "type": "string" }
+      }
+    },
+    "TerminalExecResult": {
+      "type": "object",
+      "required": ["stdout", "stderr", "exit_code", "cwd"],
+      "properties": {
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" },
+        "exit_code": { "type": "integer" },
+        "cwd": { "type": "string" }
+      }
+    },
+    "FsListParams": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" }
+      }
+    },
+    "FileEntry": {
+      "type": "object",
+      "required": ["name", "path", "is_dir", "size_bytes"],
+      "properties": {
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "is_dir": { "type": "boolean" },
+        "size_bytes": { "type": "integer" },
+        "modified_epoch_secs": { "type": "integer" }
+      }
+    },
+    "FsListResult": {
+      "type": "object",
+      "required": ["current_path", "entries"],
+      "properties": {
+        "current_path": { "type": "string" },
+        "parent_path": { "type": ["string", "null"] },
+        "entries": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/FileEntry" }
+        }
+      }
+    },
+    "FsMkdirParams": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string" }
+      }
+    },
+    "WorkspaceSetParams": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string" }
+      }
+    }
+  }
+}

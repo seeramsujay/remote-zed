@@ -10,6 +10,7 @@ Tests:
 5. Constant-time authentication token validation
 6. Telemetry metrics & power action state validation
 7. Bunker Tunnel AES-256-GCM encryption & QR pairing URI generation
+8. Terminal execution & filesystem exploration operations
 """
 
 import base64
@@ -108,6 +109,28 @@ class TestProtocolSerialization(unittest.TestCase):
         self.assertEqual(res_frame["result"]["decision"], "approved")
 
 
+    def test_terminal_and_fs_rpc_frames(self):
+        exec_frame = {
+            "jsonrpc": "2.0",
+            "id": 101,
+            "method": "terminal/exec",
+            "params": {"command": "mkdir -p new-project && cd new-project"},
+        }
+        raw_exec = json.loads(json.dumps(exec_frame))
+        self.assertEqual(raw_exec["method"], "terminal/exec")
+        self.assertEqual(raw_exec["params"]["command"], "mkdir -p new-project && cd new-project")
+
+        mkdir_frame = {
+            "jsonrpc": "2.0",
+            "id": 102,
+            "method": "fs/mkdir",
+            "params": {"path": "off-grid-api"},
+        }
+        raw_mkdir = json.loads(json.dumps(mkdir_frame))
+        self.assertEqual(raw_mkdir["method"], "fs/mkdir")
+        self.assertEqual(raw_mkdir["params"]["path"], "off-grid-api")
+
+
 class TestSessionLoggerAndReplay(unittest.TestCase):
     """Verifies append-only NDJSON transaction logging and replay logic."""
 
@@ -174,6 +197,9 @@ class TestSecurityGuardrails(unittest.TestCase):
             "git status",
             "flutter pub get",
             "npm run build",
+            "mkdir myproject",
+            "cd myproject",
+            "ls -la",
         ]
         for cmd in safe:
             is_blocked = any(b.lower() in cmd.lower() for b in self.blocked)
@@ -266,6 +292,37 @@ class TestBunkerTunnelCrypto(unittest.TestCase):
 
         with self.assertRaises(Exception):
             self.aesgcm.decrypt(nonce, bytes(ciphertext), None)
+
+
+class TestTerminalAndFsOperations(unittest.TestCase):
+    """Verifies folder creation, file operations, and interactive command execution."""
+
+    def setUp(self):
+        self.sandbox = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.sandbox)
+
+    def test_mkdir_and_subfolder_creation(self):
+        new_proj = Path(self.sandbox) / "off_grid_project"
+        os.makedirs(new_proj, exist_ok=True)
+        self.assertTrue(new_proj.is_dir())
+
+        # Create nested file
+        f = new_proj / "main.py"
+        f.write_text("print('hello off grid')")
+        self.assertTrue(f.exists())
+        self.assertEqual(f.read_text(), "print('hello off grid')")
+
+    def test_shell_command_execution(self):
+        res = subprocess.run(
+            ["bash", "-c", "echo 'bunker terminal online'"],
+            cwd=self.sandbox,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("bunker terminal online", res.stdout)
 
 
 if __name__ == "__main__":
