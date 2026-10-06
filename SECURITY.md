@@ -4,26 +4,41 @@ Because Zed Remote provides administrative access to your desktop machine over n
 
 ---
 
-## Network Isolation
+## 1. Network Transports & Firewall Resistance
 
-- **Private Mesh Only**: The host daemon does not bind to public IP interfaces (`0.0.0.0`). It binds strictly to local overlay interfaces provided by WireGuard or Tailscale (`100.x.y.z`) or `127.0.0.1`.
-- **No Port Forwarding**: The setup does not require opening public firewall ports or exposing endpoints via public reverse proxies.
-- **Mesh Encryption**: Tailscale and WireGuard encrypt all host-to-mobile network packets point-to-point at the kernel wire level.
-
----
-
-## Authentication and Transport Security
-
-- **TLS Encryption**: WebSockets utilize TLS encryption backed by locally trusted mesh certificates (`rustls`).
-- **Pre-Shared Bearer Tokens**: Handshake requests must present a pre-shared, cryptographically secure JWT in the request header (`Authorization: Bearer <TOKEN>`) or via query parameter handshake for WebSocket clients.
-- **Timing-Safe Validation**: Token comparison is performed using constant-time string comparison algorithms to prevent timing attacks.
+Zed Remote supports two connection architectures:
+1. **Direct Private Mesh**: WireGuard or Tailscale overlay network.
+2. **Bunker Tunnel (Zero-Trust, DPI & Fortinet-Resistant)**:
+   - For enterprise environments, universities, and hotel networks where firewalls (such as Fortinet, Palo Alto, or Cisco ASA) block WireGuard UDP and VPN protocols via Deep Packet Inspection (DPI).
+   - Egresses over standard **SSH over TCP Port 443** (via Pinggy or custom port 443 relays), which mimics normal HTTPS/SSL web traffic.
+   - Operates with **zero inbound port forwarding** and **zero public exposure**.
 
 ---
 
-## Tool Execution Guardrails
+## 2. Zero-Knowledge Rendezvous & QR Pairing
+
+When utilizing dynamic public relays (such as Pinggy) that rotate connection URLs:
+- **AES-256-GCM AEAD Encryption**: The ephemeral connection URL (`tcp://...:port`) is never published in plaintext. The host laptop encrypts the rendezvous payload using a locally generated 256-bit symmetric Bunker Key before dispatching to pub/sub brokers (`ntfy.sh`).
+- **Terminal QR Code Handshake**: The host CLI (`bunker_tunnel.py pair`) prints an ASCII QR code containing:
+  - Cryptographically random ntfy topic name
+  - 256-bit AES-GCM decryption key
+  - Pre-shared daemon authentication bearer token
+- **Zero-Knowledge Broker**: The notification broker (`ntfy.sh`) sees only high-entropy random ciphertext. Even if an adversary intercepts the topic, they cannot decrypt the target URL without the key scanned from your laptop's screen.
+- **Tampering Resistance**: AES-GCM includes a 16-byte Poly1305/GHASH authentication tag. Any tampering or packet alteration during relay triggers an immediate authentication rejection on mobile.
+
+---
+
+## 3. Application Authentication & In-Transit Security
+
+- **Constant-Time Verification**: Handshake bearer tokens are validated using constant-time string comparison algorithms (`subtle::ConstantTimeEq` / `hmac.compare_digest`), preventing timing side-channel attacks.
+- **Probe Rejection**: Any scanner probing the dynamic TCP port is disconnected immediately if the valid Bearer token is not presented in the opening WebSocket frame.
+
+---
+
+## 4. Tool Execution Guardrails
 
 When AI agents execute commands on your host laptop, safety bounds are enforced:
 
-- **Permission Interception**: Critical operations (shell commands, file modifications) require explicit confirmation via `session/request_permission` prompts.
-- **Command Blocklists**: The daemon can be configured to automatically deny high-risk execution strings (e.g., `rm -rf /`, `sudo`, destructive disk commands, fork bombs) regardless of mobile input.
+- **Permission Interception**: Critical operations (shell commands, file modifications) require explicit confirmation via `session/request_permission` prompts forwarded to mobile lock screens.
+- **Command Blocklists**: The daemon automatically denies high-risk execution strings (e.g., `rm -rf /`, `sudo`, destructive disk commands, fork bombs) regardless of mobile input.
 - **Workspace Sandboxing**: File modifications are restricted to the active workspace directory unless explicitly overridden by configuration.

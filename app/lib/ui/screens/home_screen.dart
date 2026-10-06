@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme.dart';
+import '../../services/bunker_tunnel_service.dart';
 import '../../services/websocket_client.dart';
 import '../../state/agent_state.dart';
 import '../widgets/agent_panel.dart';
@@ -12,8 +13,13 @@ import 'settings_sheet.dart';
 /// Main container screen supporting adaptive dual-panel and mobile tabbed layouts.
 class HomeScreen extends StatefulWidget {
   final WebSocketClient client;
+  final BunkerTunnelService bunkerService;
 
-  const HomeScreen({super.key, required this.client});
+  const HomeScreen({
+    super.key,
+    required this.client,
+    required this.bunkerService,
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -28,7 +34,10 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => SettingsSheet(client: widget.client),
+      builder: (_) => SettingsSheet(
+        client: widget.client,
+        bunkerService: widget.bunkerService,
+      ),
     );
   }
 
@@ -74,6 +83,20 @@ class _HomeScreenState extends State<HomeScreen> {
             const Text('Zed Remote'),
             const SizedBox(width: 12),
             _buildConnectionBadge(widget.client.status),
+            if (widget.bunkerService.isActive) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text(
+                  'BUNKER',
+                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppTheme.primaryAccent),
+                ),
+              ),
+            ],
           ],
         ),
         actions: [

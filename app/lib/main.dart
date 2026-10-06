@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'core/constants.dart';
 import 'core/theme.dart';
 import 'services/agent_service.dart';
+import 'services/bunker_tunnel_service.dart';
 import 'services/git_service.dart';
 import 'services/telemetry_service.dart';
 import 'services/websocket_client.dart';
@@ -28,6 +29,7 @@ void main() {
   final agentService = AgentService(client: wsClient);
   final gitService = GitService(client: wsClient);
   final telemetryService = TelemetryService(client: wsClient);
+  final bunkerService = BunkerTunnelService(webSocketClient: wsClient);
 
   runApp(
     MultiProvider(
@@ -42,15 +44,23 @@ void main() {
           create: (_) => TelemetryState(telemetryService: telemetryService),
         ),
       ],
-      child: ZedRemoteApp(client: wsClient),
+      child: ZedRemoteApp(
+        client: wsClient,
+        bunkerService: bunkerService,
+      ),
     ),
   );
 }
 
 class ZedRemoteApp extends StatelessWidget {
   final WebSocketClient client;
+  final BunkerTunnelService bunkerService;
 
-  const ZedRemoteApp({super.key, required this.client});
+  const ZedRemoteApp({
+    super.key,
+    required this.client,
+    required this.bunkerService,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -58,7 +68,10 @@ class ZedRemoteApp extends StatelessWidget {
       title: AppConstants.appName,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
-      home: HomeScreen(client: client),
+      home: HomeScreen(
+        client: client,
+        bunkerService: bunkerService,
+      ),
     );
   }
 }

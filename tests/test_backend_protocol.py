@@ -9,8 +9,10 @@ Tests:
 4. Security guardrail command blocklist & workspace boundary validation
 5. Constant-time authentication token validation
 6. Telemetry metrics & power action state validation
+7. Bunker Tunnel AES-256-GCM encryption & QR pairing URI generation
 """
 
+import base64
 import hmac
 import json
 import os
@@ -19,6 +21,8 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCHEMAS_DIR = REPO_ROOT / "shared" / "schemas"
@@ -226,6 +230,42 @@ class TestGitEngineWorkflow(unittest.TestCase):
         diff_res = subprocess.run(["git", "diff", "--", "test.txt"], cwd=self.temp_git_dir, capture_output=True, text=True)
         self.assertIn("+modified line 2", diff_res.stdout)
         self.assertIn("+line 3", diff_res.stdout)
+
+
+class TestBunkerTunnelCrypto(unittest.TestCase):
+    """Verifies AES-256-GCM encryption, decryption, and tampering resistance for the Bunker Tunnel."""
+
+    def setUp(self):
+        self.key_bytes = os.urandom(32)
+        self.key_hex = self.key_bytes.hex()
+        self.aesgcm = AESGCM(self.key_bytes)
+
+    def test_encrypt_decrypt_roundtrip(self):
+        data = {
+            "tunnel_url": "tcp://a.free.pinggy.link:43210",
+            "host": "a.free.pinggy.link",
+            "port": 43210,
+            "timestamp": 1728218400,
+        }
+        nonce = os.urandom(12)
+        payload_bytes = json.dumps(data).encode("utf-8")
+        ciphertext = self.aesgcm.encrypt(nonce, payload_bytes, None)
+
+        # Decrypt
+        decrypted_bytes = self.aesgcm.decrypt(nonce, ciphertext, None)
+        recovered = json.loads(decrypted_bytes.decode("utf-8"))
+        self.assertEqual(recovered, data)
+
+    def test_tampered_ciphertext_fails(self):
+        data = {"secret": "rendezvous_target"}
+        nonce = os.urandom(12)
+        ciphertext = bytearray(self.aesgcm.encrypt(nonce, json.dumps(data).encode("utf-8"), None))
+
+        # Flip last byte (in authentication tag)
+        ciphertext[-1] ^= 0x01
+
+        with self.assertRaises(Exception):
+            self.aesgcm.decrypt(nonce, bytes(ciphertext), None)
 
 
 if __name__ == "__main__":

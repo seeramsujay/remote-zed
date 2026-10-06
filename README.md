@@ -12,7 +12,8 @@ Zed Remote bridges your desktop development environment running the Zed editor w
 * 🛡️ **Remote Tool Authorization**: Receive push notifications and approve or reject file edits or terminal commands triggered by AI agents on your desktop.
 * 🌿 **Mobile Git Operations**: Inspect modified files, review diffs, stage changes, write commit messages, and push to remote repositories directly from mobile.
 * ⚡ **Lightweight Architecture**: Driven by a high-performance Rust daemon on the host machine and a responsive Flutter app on mobile.
-* 🔒 **End-to-End Private Mesh**: Binds directly to private WireGuard/Tailscale overlay networks so your machine is never exposed to the public internet.
+* 🏰 **Bunker Tunnel (Firewall & DPI Resistant)**: Bypasses Fortinet, corporate firewalls, and hostel restrictions using outbound SSH over port 443 with zero-knowledge AES-256-GCM rendezvous and instant QR-code mobile pairing.
+* 🔒 **End-to-End Private Mesh**: Also supports direct binding to WireGuard or Tailscale overlay networks.
 
 ---
 
@@ -20,21 +21,14 @@ Zed Remote bridges your desktop development environment running the Zed editor w
 
 | Path | Component | Description |
 | --- | --- | --- |
-| `daemon/` | Rust Host Daemon | Proxy binary that intercepts Zed stdio, exposes WebSockets, and manages Git operations. |
-| `app/` | Flutter Mobile Client | Mobile application for iOS and Android built using `acp_dart`. |
+| `daemon/` | Rust Host Daemon & Bunker Runner | Proxy binary that intercepts Zed stdio, exposes WebSockets, and manages Git operations. Includes `bunker_tunnel.py`. |
+| `app/` | Flutter Mobile Client | Mobile application for iOS and Android with dual-panel UI, QR pairing, and auto-rotating tunnel sync. |
 | `shared/` | Protocol Definitions | JSON-RPC method schemas and ACP payload specifications. |
 | `docs/` | System Documentation | Architecture specifications, security model, and setup guides. |
 
 ---
 
 ## Architecture Overview
-
-Zed Remote places a lightweight proxy daemon between Zed and the target AI agent executable:
-
-1. **Stdio Interception**: Zed launches `zed-remote-daemon`, which spawns the agent binary (e.g., AntiGravity) as a child process.
-2. **Protocol Proxying**: JSON-RPC frames passing over `stdin`/`stdout` are parsed and mirrored to a secure WebSocket server.
-3. **Mobile Stream**: The Flutter app connects over Tailscale, rendering real-time streaming text and interactive tool permission cards.
-4. **Out-of-Band Workflows**: Git commits, pushes, and host telemetry requests bypass the editor UI and execute directly via native host calls.
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -50,11 +44,18 @@ Zed Remote places a lightweight proxy daemon between Zed and the target AI agent
 │             │   zed-remote-daemon     │                │
 │             │  (Rust Tokio Gateway)   │                │
 │             └────────────┬────────────┘                │
+│                          │                             │
+│             ┌────────────▼────────────┐                │
+│             │   Bunker Tunnel Runner  │                │
+│             │  (SSH 443 + AES-256-GCM)│                │
+│             └────────────┬────────────┘                │
 └──────────────────────────┼─────────────────────────────┘
-                           │
-             Tailscale / WireGuard (WSS + JWT)
-                           │
-              ┌────────────▼────────────┐
+                           │ Outbound TCP 443 (DPI Proof)
+                           ▼
+          Pinggy Relay + ntfy Encrypted Rendezvous
+                           ▲
+                           │ Decrypts with Scanned Key
+              ┌────────────┴────────────┐
               │   Flutter Mobile App    │
               │  (Agent & Git Control)  │
               └─────────────────────────┘
@@ -62,38 +63,36 @@ Zed Remote places a lightweight proxy daemon between Zed and the target AI agent
 
 ---
 
-## Quick Start
+## Quick Start (Bunker Tunnel - Recommended for Firewalls)
 
-### 1. Build and Install the Host Daemon
+### 1. Pair Laptop & Phone via Terminal QR Code
+
+On your laptop:
 
 ```bash
-cd daemon
-cargo build --release
-sudo cp target/release/zed-remote-daemon /usr/local/bin/
+python3 daemon/scripts/bunker_tunnel.py pair
 ```
 
-### 2. Configure Zed Settings
+A clean ASCII QR code will appear in your terminal containing your zero-knowledge encryption key and secret rendezvous topic.
 
-Add `zed-remote-daemon` as a custom ACP agent in your Zed `settings.json` file:
+### 2. Start the Bunker Tunnel Supervisor
 
-```json
-{
-  "agent_servers": {
-    "AntiGravity-Remote": {
-      "type": "custom",
-      "command": "/usr/local/bin/zed-remote-daemon",
-      "args": [
-        "--target-command", "/usr/local/bin/antigravity",
-        "--target-args", "acp",
-        "--port", "8443"
-      ]
-    }
-  }
-}
+```bash
+python3 daemon/scripts/bunker_tunnel.py run
 ```
 
-### 3. Mobile Setup
+### 3. Connect Mobile App
 
-1. Connect your phone to your Tailscale network.
-2. Open the **Zed Remote Mobile App**.
-3. Enter your host laptop's Tailscale IP address (`100.x.y.z:8443`) and your secret authentication token.
+1. Open **Zed Remote** on your phone.
+2. Tap the settings gear icon and switch to **Bunker Mode**.
+3. Scan the terminal QR code or paste the pairing URI.
+4. Your phone automatically syncs with the live tunnel and reconnects seamlessly across dynamic rotations!
+
+---
+
+## Traditional Mesh Setup (Tailscale)
+
+If you prefer Tailscale:
+1. Connect both laptop and phone to your Tailnet.
+2. Launch `zed-remote-daemon` on `100.x.y.z:8443`.
+3. Enter your Tailscale IP in the mobile app settings.
