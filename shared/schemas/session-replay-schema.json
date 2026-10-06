@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ZedRemoteSessionReplayProtocol",
+  "description": "Schemas for append-only JSONL session event logs and state replay",
+  "definitions": {
+    "LoggedEvent": {
+      "type": "object",
+      "required": ["seq", "timestamp", "direction", "frame"],
+      "properties": {
+        "seq": { "type": "integer" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "direction": {
+          "type": "string",
+          "enum": ["zed_to_agent", "agent_to_zed", "mobile_to_agent", "daemon_to_mobile"]
+        },
+        "frame": { "type": "object" }
+      }
+    },
+    "SessionLoadParams": {
+      "type": "object",
+      "required": ["sessionId"],
+      "properties": {
+        "sessionId": { "type": "string" },
+        "fromSequence": { "type": "integer", "default": 0 }
+      }
+    },
+    "SessionLoadResult": {
+      "type": "object",
+      "required": ["sessionId", "totalEvents", "events"],
+      "properties": {
+        "sessionId": { "type": "string" },
+        "totalEvents": { "type": "integer" },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/LoggedEvent" }
+        }
+      }
+    }
+  }
+}

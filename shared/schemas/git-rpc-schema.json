@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ZedRemoteGitProtocol",
+  "description": "JSON-RPC 2.0 schemas for Zed Remote Git management operations",
+  "definitions": {
+    "GitStatusFile": {
+      "type": "object",
+      "required": ["path", "status", "staged"],
+      "properties": {
+        "path": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["modified", "new", "deleted", "renamed", "untracked", "conflict"]
+        },
+        "staged": { "type": "boolean" },
+        "insertions": { "type": "integer" },
+        "deletions": { "type": "integer" }
+      }
+    },
+    "GitStatusResult": {
+      "type": "object",
+      "required": ["branch", "clean", "files"],
+      "properties": {
+        "branch": { "type": "string" },
+        "clean": { "type": "boolean" },
+        "ahead": { "type": "integer" },
+        "behind": { "type": "integer" },
+        "files": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/GitStatusFile" }
+        }
+      }
+    },
+    "GitDiffParams": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "staged": { "type": "boolean" }
+      }
+    },
+    "GitDiffResult": {
+      "type": "object",
+      "required": ["path", "diff"],
+      "properties": {
+        "path": { "type": "string" },
+        "diff": { "type": "string" },
+        "insertions": { "type": "integer" },
+        "deletions": { "type": "integer" }
+      }
+    },
+    "GitStageParams": {
+      "type": "object",
+      "required": ["paths"],
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "GitCommitParams": {
+      "type": "object",
+      "required": ["message"],
+      "properties": {
+        "message": { "type": "string" },
+        "stageAll": { "type": "boolean", "default": false }
+      }
+    },
+    "GitCommitResult": {
+      "type": "object",
+      "required": ["commitHash", "branch"],
+      "properties": {
+        "commitHash": { "type": "string" },
+        "branch": { "type": "string" },
+        "summary": { "type": "string" }
+      }
+    },
+    "GitPushParams": {
+      "type": "object",
+      "properties": {
+        "remote": { "type": "string", "default": "origin" },
+        "branch": { "type": "string" }
+      }
+    },
+    "GitPushResult": {
+      "type": "object",
+      "required": ["success", "message"],
+      "properties": {
+        "success": { "type": "boolean" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

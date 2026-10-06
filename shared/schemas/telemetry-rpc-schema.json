@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ZedRemoteTelemetryProtocol",
+  "description": "JSON-RPC 2.0 schemas for Zed Remote system telemetry and diagnostics",
+  "definitions": {
+    "TelemetryResult": {
+      "type": "object",
+      "required": ["hostName", "os", "cpuUsagePercent", "memoryUsedBytes", "memoryTotalBytes"],
+      "properties": {
+        "hostName": { "type": "string" },
+        "os": { "type": "string" },
+        "cpuUsagePercent": { "type": "number" },
+        "memoryUsedBytes": { "type": "integer" },
+        "memoryTotalBytes": { "type": "integer" },
+        "batteryPercent": { "type": "number" },
+        "isCharging": { "type": "boolean" },
+        "uptimeSeconds": { "type": "integer" },
+        "thermalState": { "type": "string" }
+      }
+    },
+    "PowerActionParams": {
+      "type": "object",
+      "required": ["action"],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["sleep", "lock", "shutdown", "reboot"]
+        }
+      }
+    },
+    "PowerActionResult": {
+      "type": "object",
+      "required": ["acknowledged", "message"],
+      "properties": {
+        "acknowledged": { "type": "boolean" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgentClientProtocol",
+  "description": "Standard Agent Client Protocol (ACP) JSON-RPC 2.0 message schemas for Zed Remote",
+  "definitions": {
+    "RequestId": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "integer" }
+      ]
+    },
+    "InitializeRequest": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "type": "string", "const": "2.0" },
+        "id": { "$ref": "#/definitions/RequestId" },
+        "method": { "type": "string", "const": "initialize" },
+        "params": {
+          "type": "object",
+          "required": ["protocolVersion"],
+          "properties": {
+            "protocolVersion": { "type": "integer" },
+            "clientCapabilities": {
+              "type": "object",
+              "properties": {
+                "fs": {
+                  "type": "object",
+                  "properties": {
+                    "readTextFile": { "type": "boolean" },
+                    "writeTextFile": { "type": "boolean" }
+                  }
+                },
+                "terminal": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "PromptRequest": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "type": "string", "const": "2.0" },
+        "id": { "$ref": "#/definitions/RequestId" },
+        "method": { "type": "string", "const": "session/prompt" },
+        "params": {
+          "type": "object",
+          "required": ["sessionId", "prompt"],
+          "properties": {
+            "sessionId": { "type": "string" },
+            "prompt": { "type": "string" }
+          }
+        }
+      }
+    },
+    "SessionUpdateNotification": {
+      "type": "object",
+      "required": ["jsonrpc", "method", "params"],
+      "properties": {
+        "jsonrpc": { "type": "string", "const": "2.0" },
+        "method": { "type": "string", "const": "session/update" },
+        "params": {
+          "type": "object",
+          "required": ["sessionId", "update"],
+          "properties": {
+            "sessionId": { "type": "string" },
+            "update": {
+              "type": "object",
+              "required": ["sessionUpdateType"],
+              "properties": {
+                "sessionUpdateType": {
+                  "type": "string",
+                  "enum": [
+                    "agent_message_chunk",
+                    "agent_thought_chunk",
+                    "tool_call_started",
+                    "tool_call_completed",
+                    "turn_completed"
+                  ]
+                },
+                "content": {
+                  "type": "object",
+                  "properties": {
+                    "type": { "type": "string" },
+                    "text": { "type": "string" }
+                  }
+                },
+                "toolCall": {
+                  "type": "object",
+                  "properties": {
+                    "toolCallId": { "type": "string" },
+                    "name": { "type": "string" },
+                    "parameters": { "type": "object" },
+                    "result": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "RequestPermissionRequest": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "type": "string", "const": "2.0" },
+        "id": { "$ref": "#/definitions/RequestId" },
+        "method": { "type": "string", "const": "session/request_permission" },
+        "params": {
+          "type": "object",
+          "required": ["sessionId", "toolCall"],
+          "properties": {
+            "sessionId": { "type": "string" },
+            "toolCall": {
+              "type": "object",
+              "required": ["toolCallId", "name", "parameters"],
+              "properties": {
+                "toolCallId": { "type": "string" },
+                "name": { "type": "string" },
+                "parameters": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "RequestPermissionResponse": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "result"],
+      "properties": {
+        "jsonrpc": { "type": "string", "const": "2.0" },
+        "id": { "$ref": "#/definitions/RequestId" },
+        "result": {
+          "type": "object",
+          "required": ["decision"],
+          "properties": {
+            "decision": {
+              "type": "string",
+              "enum": ["approved", "rejected", "modified"]
+            },
+            "reason": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}
