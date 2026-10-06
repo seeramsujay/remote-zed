@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme.dart';
-import '../../models/git_models.dart';
 import '../../state/git_state.dart';
 import 'diff_viewer.dart';
 
@@ -20,7 +19,9 @@ class _RepositoryPanelState extends State<RepositoryPanel> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<GitState>().refreshStatus();
+      if (mounted) {
+        context.read<GitState>().refreshStatus();
+      }
     });
   }
 
@@ -30,9 +31,9 @@ class _RepositoryPanelState extends State<RepositoryPanel> {
     super.dispose();
   }
 
-  void _showDiff(BuildContext context, GitState gitState, String? path) async {
+  Future<void> _showDiff(BuildContext context, GitState gitState, String? path) async {
     await gitState.loadDiff(path);
-    if (!mounted) return;
+    if (!context.mounted) return;
     if (gitState.selectedDiff != null) {
       showDialog(
         context: context,
@@ -90,7 +91,7 @@ class _RepositoryPanelState extends State<RepositoryPanel> {
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.check_circle_outline, size: 48, color: AppTheme.success.withOpacity(0.6)),
+                            Icon(Icons.check_circle_outline, size: 48, color: AppTheme.success.withValues(alpha: 0.6)),
                             const SizedBox(height: 12),
                             const Text(
                               'Working Tree Clean',

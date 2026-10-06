@@ -45,7 +45,7 @@ class TelemetryBar extends StatelessWidget {
       child: Row(
         children: [
           // Host & OS
-          Icon(Icons.laptop_chromebook, size: 16, color: AppTheme.primaryAccent),
+          const Icon(Icons.laptop_chromebook, size: 16, color: AppTheme.primaryAccent),
           const SizedBox(width: 6),
           Text(
             data.hostName,

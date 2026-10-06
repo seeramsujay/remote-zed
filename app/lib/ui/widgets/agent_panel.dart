@@ -64,7 +64,7 @@ class _AgentPanelState extends State<AgentPanel> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.terminal, size: 48, color: AppTheme.textSecondary.withOpacity(0.5)),
+                      Icon(Icons.terminal, size: 48, color: AppTheme.textSecondary.withValues(alpha: 0.5)),
                       const SizedBox(height: 12),
                       const Text(
                         'Zed Remote Agent Session Active',
@@ -93,7 +93,7 @@ class _AgentPanelState extends State<AgentPanel> {
         if (agentState.errorMessage != null)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: AppTheme.danger.withOpacity(0.15),
+            color: AppTheme.danger.withValues(alpha: 0.15),
             child: Row(
               children: [
                 const Icon(Icons.error_outline, size: 16, color: AppTheme.danger),
@@ -207,10 +207,10 @@ class _AgentPanelState extends State<AgentPanel> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: isUser ? AppTheme.primary.withOpacity(0.12) : AppTheme.surface,
+              color: isUser ? AppTheme.primary.withValues(alpha: 0.12) : AppTheme.surface,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
-                color: isUser ? AppTheme.primary.withOpacity(0.3) : AppTheme.border,
+                color: isUser ? AppTheme.primary.withValues(alpha: 0.3) : AppTheme.border,
               ),
             ),
             child: turn.content.isEmpty && turn.isStreaming

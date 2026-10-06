@@ -1,4 +1,5 @@
 /// Data models for ACP (Agent Client Protocol) conversation turns, thoughts, and permissions.
+library;
 
 class ThoughtChunk {
   final String text;

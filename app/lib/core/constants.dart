@@ -1,4 +1,5 @@
 /// Application constants and configuration defaults.
+library;
 
 class AppConstants {
   static const String appName = 'Zed Remote';

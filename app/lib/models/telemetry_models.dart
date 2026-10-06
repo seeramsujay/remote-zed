@@ -1,4 +1,5 @@
 /// Data models for system telemetry and power actions.
+library;
 
 class TelemetryResult {
   final String hostName;

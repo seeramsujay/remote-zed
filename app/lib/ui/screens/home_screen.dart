@@ -36,19 +36,20 @@ class _HomeScreenState extends State<HomeScreen> {
     if (agentState.pendingPermission != null && !_isPermissionDialogOpen) {
       _isPermissionDialogOpen = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
         showDialog(
           context: context,
           barrierDismissible: false,
-          builder: (_) => PermissionDialog(
+          builder: (dialogCtx) => PermissionDialog(
             request: agentState.pendingPermission!,
             onApprove: () {
               agentState.approvePermission();
-              Navigator.of(context).pop();
+              Navigator.of(dialogCtx).pop();
               _isPermissionDialogOpen = false;
             },
             onReject: (reason) {
               agentState.rejectPermission(reason);
-              Navigator.of(context).pop();
+              Navigator.of(dialogCtx).pop();
               _isPermissionDialogOpen = false;
             },
           ),
@@ -170,9 +171,9 @@ class _HomeScreenState extends State<HomeScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
+        color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.4)),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

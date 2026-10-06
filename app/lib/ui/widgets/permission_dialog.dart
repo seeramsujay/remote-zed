@@ -27,11 +27,11 @@ class PermissionDialog extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         side: const BorderSide(color: AppTheme.warning, width: 1.5),
       ),
-      title: Row(
+      title: const Row(
         children: [
-          const Icon(Icons.shield_outlined, color: AppTheme.warning, size: 24),
-          const SizedBox(width: 8),
-          const Expanded(
+          Icon(Icons.shield_outlined, color: AppTheme.warning, size: 24),
+          SizedBox(width: 8),
+          Expanded(
             child: Text(
               'Tool Authorization Required',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -44,7 +44,7 @@ class PermissionDialog extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Text(
               'The agent requests permission to execute:',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
             ),

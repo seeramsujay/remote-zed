@@ -1,4 +1,5 @@
 /// Data models for Git operations and repository inspection.
+library;
 
 class GitFileStatus {
   final String path;
