@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info};
-use tracing_subscriber::{layer::SubscriberInitExt, util::SubscriberInitExt as _, EnvFilter};
+use tracing_subscriber::EnvFilter;
 
 use zed_remote_daemon::config::Config;
 use zed_remote_daemon::gateway::{AuthValidator, WebSocketGateway};

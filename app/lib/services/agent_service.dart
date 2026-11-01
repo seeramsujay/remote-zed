@@ -44,7 +44,7 @@ class AgentService {
   void respondPermission(dynamic requestId, bool approved, [String? reason]) {
     client.sendResponse(requestId, {
       'decision': approved ? 'approved' : 'rejected',
-      if (reason != null) 'reason': reason,
+      'reason': ?reason,
     });
   }
 

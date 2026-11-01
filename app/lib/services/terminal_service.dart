@@ -27,7 +27,7 @@ class TerminalService {
   /// Lists entries in a directory.
   Future<FsListResult> listDirectory([String? path]) async {
     final res = await client.sendRequest('fs/list', {
-      if (path != null) 'path': path,
+      'path': ?path,
     });
     return FsListResult.fromJson(res as Map<String, dynamic>);
   }
