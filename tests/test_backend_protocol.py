@@ -13,7 +13,6 @@ Tests:
 8. Terminal execution & filesystem exploration operations
 """
 
-import base64
 import hmac
 import json
 import os
@@ -108,7 +107,6 @@ class TestProtocolSerialization(unittest.TestCase):
         self.assertEqual(req_frame["id"], res_frame["id"])
         self.assertEqual(res_frame["result"]["decision"], "approved")
 
-
     def test_terminal_and_fs_rpc_frames(self):
         exec_frame = {
             "jsonrpc": "2.0",
@@ -118,7 +116,9 @@ class TestProtocolSerialization(unittest.TestCase):
         }
         raw_exec = json.loads(json.dumps(exec_frame))
         self.assertEqual(raw_exec["method"], "terminal/exec")
-        self.assertEqual(raw_exec["params"]["command"], "mkdir -p new-project && cd new-project")
+        self.assertEqual(
+            raw_exec["params"]["command"], "mkdir -p new-project && cd new-project"
+        )
 
         mkdir_frame = {
             "jsonrpc": "2.0",
@@ -145,15 +145,26 @@ class TestSessionLoggerAndReplay(unittest.TestCase):
     def test_append_and_replay(self):
         events = [
             {"seq": 1, "direction": "zed_to_agent", "frame": {"method": "initialize"}},
-            {"seq": 2, "direction": "agent_to_zed", "frame": {"result": {"ready": True}}},
-            {"seq": 3, "direction": "mobile_to_agent", "frame": {"method": "session/prompt"}},
-            {"seq": 4, "direction": "agent_to_zed", "frame": {"method": "session/update"}},
+            {
+                "seq": 2,
+                "direction": "agent_to_zed",
+                "frame": {"result": {"ready": True}},
+            },
+            {
+                "seq": 3,
+                "direction": "mobile_to_agent",
+                "frame": {"method": "session/prompt"},
+            },
+            {
+                "seq": 4,
+                "direction": "agent_to_zed",
+                "frame": {"method": "session/update"},
+            },
         ]
 
         # Write sequential frames
         with open(self.log_path, "a") as f:
-            for ev in events:
-                f.write(json.dumps(ev) + "\n")
+            f.writelines(json.dumps(ev) + "\n" for ev in events)
 
         # Read back and replay from sequence 3
         replayed = []
@@ -229,9 +240,17 @@ class TestGitEngineWorkflow(unittest.TestCase):
 
     def setUp(self):
         self.temp_git_dir = tempfile.mkdtemp()
-        subprocess.run(["git", "init"], cwd=self.temp_git_dir, check=True, capture_output=True)
-        subprocess.run(["git", "config", "user.name", "Tester"], cwd=self.temp_git_dir, check=True)
-        subprocess.run(["git", "config", "user.email", "tester@test.local"], cwd=self.temp_git_dir, check=True)
+        subprocess.run(
+            ["git", "init"], cwd=self.temp_git_dir, check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Tester"], cwd=self.temp_git_dir, check=True
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "tester@test.local"],
+            cwd=self.temp_git_dir,
+            check=True,
+        )
 
     def tearDown(self):
         shutil.rmtree(self.temp_git_dir)
@@ -243,17 +262,31 @@ class TestGitEngineWorkflow(unittest.TestCase):
 
         # Initial commit
         subprocess.run(["git", "add", "test.txt"], cwd=self.temp_git_dir, check=True)
-        subprocess.run(["git", "commit", "-m", "init"], cwd=self.temp_git_dir, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"], cwd=self.temp_git_dir, check=True
+        )
 
         # Modify file
         test_file.write_text("line 1\nmodified line 2\nline 3\n")
 
         # Query git status porcelain
-        res = subprocess.run(["git", "status", "--porcelain=v1"], cwd=self.temp_git_dir, capture_output=True, text=True)
+        res = subprocess.run(
+            ["git", "status", "--porcelain=v1"],
+            cwd=self.temp_git_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
         self.assertIn("M test.txt", res.stdout)
 
         # Query git diff
-        diff_res = subprocess.run(["git", "diff", "--", "test.txt"], cwd=self.temp_git_dir, capture_output=True, text=True)
+        diff_res = subprocess.run(
+            ["git", "diff", "--", "test.txt"],
+            cwd=self.temp_git_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
         self.assertIn("+modified line 2", diff_res.stdout)
         self.assertIn("+line 3", diff_res.stdout)
 
@@ -285,12 +318,14 @@ class TestBunkerTunnelCrypto(unittest.TestCase):
     def test_tampered_ciphertext_fails(self):
         data = {"secret": "rendezvous_target"}
         nonce = os.urandom(12)
-        ciphertext = bytearray(self.aesgcm.encrypt(nonce, json.dumps(data).encode("utf-8"), None))
+        ciphertext = bytearray(
+            self.aesgcm.encrypt(nonce, json.dumps(data).encode("utf-8"), None)
+        )
 
         # Flip last byte (in authentication tag)
         ciphertext[-1] ^= 0x01
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017
             self.aesgcm.decrypt(nonce, bytes(ciphertext), None)
 
 
@@ -318,6 +353,7 @@ class TestTerminalAndFsOperations(unittest.TestCase):
         res = subprocess.run(
             ["bash", "-c", "echo 'bunker terminal online'"],
             cwd=self.sandbox,
+            check=False,
             capture_output=True,
             text=True,
         )
