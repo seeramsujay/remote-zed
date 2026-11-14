@@ -22,7 +22,10 @@ from pathlib import Path
 try:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 except ImportError:
-    print("Error: 'cryptography' library is required. Install with: pip install cryptography", file=sys.stderr)
+    print(
+        "Error: 'cryptography' library is required. Install with: pip install cryptography",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 try:
@@ -60,7 +63,10 @@ def save_config(config):
 def load_config():
     """Loads existing configuration from disk or exits."""
     if not CONFIG_FILE.exists():
-        print(f"[-] No configuration found at {CONFIG_FILE}. Run 'bunker_tunnel.py pair' first.", file=sys.stderr)
+        print(
+            f"[-] No configuration found at {CONFIG_FILE}. Run 'bunker_tunnel.py pair' first.",
+            file=sys.stderr,
+        )
         sys.exit(1)
     with open(CONFIG_FILE, "r") as f:
         return json.load(f)
@@ -93,7 +99,9 @@ def decrypt_payload(key_hex: str, b64_ciphertext: str) -> dict:
 def render_terminal_qr(pairing_uri: str):
     """Renders an ASCII QR code directly into the terminal."""
     if qrcode is None:
-        print("\n[!] Python 'qrcode' module not installed. Install with: pip install qrcode")
+        print(
+            "\n[!] Python 'qrcode' module not installed. Install with: pip install qrcode"
+        )
         print(f"[!] Pairing URI: {pairing_uri}\n")
         return
 
@@ -136,8 +144,12 @@ def cmd_pair(args):
     render_terminal_qr(pairing_uri)
     print("[+] Pairing parameters generated successfully.")
     print(f"    - Ntfy Topic:       {config['ntfy_topic']}")
-    print(f"    - AES-256 Key:      {config['bunker_key'][:8]}...{config['bunker_key'][-8:]}")
-    print(f"    - Daemon Token:     {config['daemon_token'][:8]}...{config['daemon_token'][-8:]}")
+    print(
+        f"    - AES-256 Key:      {config['bunker_key'][:8]}...{config['bunker_key'][-8:]}"
+    )
+    print(
+        f"    - Daemon Token:     {config['daemon_token'][:8]}...{config['daemon_token'][-8:]}"
+    )
     print(f"    - Local Daemon Port:{config['local_port']}\n")
     print("[*] To start the bunker tunnel service, run:")
     print("    python3 daemon/scripts/bunker_tunnel.py run\n")
@@ -184,7 +196,7 @@ def cmd_run(args):
     print("   STARTING BUNKER TUNNEL (FORTINET / FIREWALL RESISTANT)")
     print("=" * 60)
     print(f"[*] Local Daemon Target:  localhost:{local_port}")
-    print(f"[*] Egress Protocol:      SSH over TCP Port 443 (free.pinggy.io)")
+    print("[*] Egress Protocol:      SSH over TCP Port 443 (free.pinggy.io)")
     print(f"[*] Rendezvous Channel:   https://ntfy.sh/{topic} (AES-256-GCM Encrypted)")
     print("=" * 60 + "\n")
 
@@ -201,7 +213,9 @@ def cmd_run(args):
     rotation_interval_seconds = 3300  # 55 minutes
 
     while True:
-        print(f"[{time.strftime('%X')}] Initializing fresh reverse tunnel via Pinggy port 443...")
+        print(
+            f"[{time.strftime('%X')}] Initializing fresh reverse tunnel via Pinggy port 443..."
+        )
         subprocess.run(["pkill", "-f", "free.pinggy.io"], capture_output=True)
 
         with open(log_file, "w") as f:
@@ -258,13 +272,17 @@ def cmd_run(args):
 
             # Publish to ntfy
             if publish_to_ntfy(topic, ciphertext):
-                print(f"[+] Published encrypted rendezvous update to https://ntfy.sh/{topic}")
+                print(
+                    f"[+] Published encrypted rendezvous update to https://ntfy.sh/{topic}"
+                )
             else:
                 print("[-] Warning: Failed to publish rendezvous to ntfy.")
         else:
             print("[-] Could not capture tunnel URL from Pinggy within timeout.")
 
-        print(f"[*] Sleeping for 55 minutes (next rotation at {time.strftime('%X', time.localtime(time.time() + rotation_interval_seconds))})...")
+        print(
+            f"[*] Sleeping for 55 minutes (next rotation at {time.strftime('%X', time.localtime(time.time() + rotation_interval_seconds))})..."
+        )
         try:
             time.sleep(rotation_interval_seconds)
         except KeyboardInterrupt:
@@ -274,7 +292,10 @@ def cmd_run(args):
 def cmd_test_crypto(args):
     """Verifies AES-256-GCM encryption and decryption roundtrip."""
     config = generate_bunker_keys()
-    test_data = {"tunnel_url": "tcp://a.free.pinggy.link:43210", "timestamp": 1728218400}
+    test_data = {
+        "tunnel_url": "tcp://a.free.pinggy.link:43210",
+        "timestamp": 1728218400,
+    }
     ciphertext = encrypt_payload(config["bunker_key"], test_data)
     recovered = decrypt_payload(config["bunker_key"], ciphertext)
 
@@ -286,21 +307,31 @@ def cmd_test_crypto(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Bunker Tunnel: Firewall-Resistant Zero-Trust Tunnel for Zed Remote")
+    parser = argparse.ArgumentParser(
+        description="Bunker Tunnel: Firewall-Resistant Zero-Trust Tunnel for Zed Remote"
+    )
     subparsers = parser.add_subparsers(dest="subcommand", required=True)
 
     # pair
-    p_pair = subparsers.add_parser("pair", help="Generate credentials and show QR code for phone")
-    p_pair.add_argument("--port", type=int, default=8443, help="Local daemon port (default: 8443)")
+    p_pair = subparsers.add_parser(
+        "pair", help="Generate credentials and show QR code for phone"
+    )
+    p_pair.add_argument(
+        "--port", type=int, default=8443, help="Local daemon port (default: 8443)"
+    )
     p_pair.add_argument("--topic", type=str, help="Custom ntfy topic name")
     p_pair.set_defaults(func=cmd_pair)
 
     # run
-    p_run = subparsers.add_parser("run", help="Start the Pinggy reverse tunnel and encrypted ntfy publisher loop")
+    p_run = subparsers.add_parser(
+        "run", help="Start the Pinggy reverse tunnel and encrypted ntfy publisher loop"
+    )
     p_run.set_defaults(func=cmd_run)
 
     # test
-    p_test = subparsers.add_parser("test-crypto", help="Test AES-256-GCM encryption roundtrip")
+    p_test = subparsers.add_parser(
+        "test-crypto", help="Test AES-256-GCM encryption roundtrip"
+    )
     p_test.set_defaults(func=cmd_test_crypto)
 
     args = parser.parse_args()
