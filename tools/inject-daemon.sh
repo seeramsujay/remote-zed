@@ -63,11 +63,17 @@ else:
     data = {}
 
 agent_servers = data.get('agent_servers', {})
+target_agent = "agy"
+if shutil.which("agy"):
+    target_agent = shutil.which("agy")
+elif shutil.which("antigravity"):
+    target_agent = shutil.which("antigravity")
+
 agent_servers['AntiGravity-Remote'] = {
     'type': 'custom',
     'command': '${TARGET_BIN}',
     'args': [
-        '--target-command', 'antigravity',
+        '--target-command', target_agent,
         '--target-args', 'acp',
         '--port', '8443',
         '--auth-token', '${TOKEN}'
