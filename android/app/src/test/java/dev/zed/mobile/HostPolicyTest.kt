@@ -6,7 +6,7 @@ import org.junit.Test
 
 class HostPolicyTest {
     @Test
-    fun `parse trims HTTPS origins and permits approved HTTP literal IPs`() {
+    fun `parse trims HTTPS origins and permits approved HTTP literal IPs and tunnels`() {
         assertEquals(
             "https://zed.example:7443/",
             HostPolicy.parse("  https://zed.example:7443/  ", debug = false).toString(),
@@ -24,8 +24,20 @@ class HostPolicyTest {
             HostPolicy.parse("http://10.0.2.2:7443", debug = true).toString(),
         )
         assertEquals(
+            "http://192.168.1.100:8443/",
+            HostPolicy.parse("http://192.168.1.100:8443", debug = false).toString(),
+        )
+        assertEquals(
             "http://[fd7a:115c:a1e0::1]:7443/",
             HostPolicy.parse("http://[fd7a:115c:a1e0::1]:7443", debug = false).toString(),
+        )
+        assertEquals(
+            "http://ktupz-115-246-86-13.run.pinggy-free.link:43767/",
+            HostPolicy.parse("http://ktupz-115-246-86-13.run.pinggy-free.link:43767", debug = false).toString(),
+        )
+        assertEquals(
+            "http://mysite.free.pinggy.io:8080/",
+            HostPolicy.parse("http://mysite.free.pinggy.io:8080", debug = false).toString(),
         )
     }
 

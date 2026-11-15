@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/theme.dart';
 import '../../services/bunker_tunnel_service.dart';
 import '../../services/websocket_client.dart';
@@ -62,14 +63,25 @@ class _SettingsSheetState extends State<SettingsSheet> {
     Navigator.of(context).pop();
   }
 
-  void _applyBunkerPairing() {
-    final uriStr = _bunkerUriController.text.trim();
-    final creds = BunkerCredentials.fromUri(uriStr);
+  Future<void> _applyBunkerPairing() async {
+    var uriStr = _bunkerUriController.text.trim();
+
+    // If text field is empty, attempt reading from clipboard
+    if (uriStr.isEmpty) {
+      final clip = await Clipboard.getData(Clipboard.kTextPlain);
+      if (clip?.text != null && clip!.text!.trim().isNotEmpty) {
+        uriStr = clip.text!.trim();
+        _bunkerUriController.text = uriStr;
+      }
+    }
+
+    final creds = BunkerCredentials.parse(uriStr);
+    if (!mounted) return;
 
     if (creds == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Invalid Bunker URI. Must match: zed-remote://pair?...'),
+          content: Text('Invalid Bunker payload. Paste the ZEDBUNKER payload or QR code from the terminal.'),
           backgroundColor: AppTheme.danger,
         ),
       );
@@ -77,6 +89,13 @@ class _SettingsSheetState extends State<SettingsSheet> {
     }
 
     widget.bunkerService.activate(creds);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Bunker paired! Auto-syncing dynamic rendezvous...'),
+        backgroundColor: AppTheme.success,
+        duration: Duration(seconds: 3),
+      ),
+    );
     Navigator.of(context).pop();
   }
 
@@ -159,16 +178,28 @@ class _SettingsSheetState extends State<SettingsSheet> {
                 ),
               ),
               const SizedBox(height: 16),
-              const Text('Pairing URI (from terminal QR code):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              const Text('Pairing Payload (from terminal QR code):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               TextField(
                 controller: _bunkerUriController,
                 decoration: InputDecoration(
-                  hintText: 'zed-remote://pair?topic=...&key=...',
+                  hintText: 'Paste ZEDBUNKER:... or zed-remote://pair?...',
                   hintStyle: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
                   filled: true,
                   fillColor: AppTheme.background,
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.paste_rounded, size: 20, color: AppTheme.primaryAccent),
+                    tooltip: 'Paste from clipboard',
+                    onPressed: () async {
+                      final clip = await Clipboard.getData(Clipboard.kTextPlain);
+                      if (clip?.text != null && clip!.text!.trim().isNotEmpty) {
+                        setState(() {
+                          _bunkerUriController.text = clip.text!.trim();
+                        });
+                      }
+                    },
+                  ),
                 ),
               ),
               if (widget.bunkerService.isActive) ...[

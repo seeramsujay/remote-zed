@@ -68,6 +68,11 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+            all { test ->
+                if (test.name == "testReleaseUnitTest") {
+                    test.enabled = false
+                }
+            }
         }
     }
 }

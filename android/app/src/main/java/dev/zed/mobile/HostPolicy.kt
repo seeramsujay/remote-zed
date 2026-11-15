@@ -25,10 +25,14 @@ object HostPolicy {
     }
 
     private fun isAllowedHttp(host: String, debug: Boolean): Boolean {
-        // Allow bunker tunnel reverse proxy hosts (e.g. Pinggy, Cloudflare, ngrok)
-        if (host.endsWith("pinggy.io") || host.endsWith("pinggy.link") ||
-            host.endsWith(".trycloudflare.com") || host.endsWith(".ngrok.io") ||
-            host.endsWith(".ngrok-free.app")
+        val lower = host.lowercase()
+        // Allow bunker tunnel reverse proxy hosts (e.g. Pinggy, Cloudflare, ngrok, localhost tunnels)
+        if (lower.contains("pinggy") ||
+            lower.endsWith(".trycloudflare.com") ||
+            lower.contains("ngrok") ||
+            lower.endsWith(".loca.lt") ||
+            lower.endsWith(".serveo.net") ||
+            lower.endsWith(".bore.pub")
         ) {
             return true
         }
@@ -47,8 +51,12 @@ object HostPolicy {
             if (!it.matches(Regex("0|[1-9][0-9]{0,2}"))) return false
             it.toInt().also { n -> if (n > 255) return false }
         }
-        return octets[0] == 127 || (octets[0] == 100 && octets[1] in 64..127) ||
-                (debug && octets == listOf(10, 0, 2, 2))
+        val isLoopback = octets[0] == 127
+        val isTailscale = octets[0] == 100 && octets[1] in 64..127
+        val isPrivateLan = (octets[0] == 192 && octets[1] == 168) ||
+                (octets[0] == 172 && octets[1] in 16..31)
+        return isLoopback || isTailscale || isPrivateLan ||
+                (debug && (octets[0] == 10 || octets == listOf(10, 0, 2, 2)))
     }
 
     private inline fun ByteArray.allIndexed(endExclusive: Int, predicate: (Byte) -> Boolean): Boolean {
