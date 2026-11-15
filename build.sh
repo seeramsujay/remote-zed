@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Zed Remote - Automated One-Shot Compilation & Installation Suite
-# Compiles both the high-performance Rust host daemon and the Flutter mobile client.
+# Compiles the Rust host daemon and the Material 3 Jetpack Compose Android app.
 # ==============================================================================
 
 set -euo pipefail
@@ -13,7 +13,7 @@ BLUE="\033[0;34m"
 YELLOW="\033[1;33m"
 RED="\033[0;31m"
 CYAN="\033[0;36m"
-NC="\033[0m" # No Color
+NC="\033[0m"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
@@ -49,45 +49,23 @@ echo -e "Directory: ${ROOT_DIR}\n"
 # ------------------------------------------------------------------------------
 # 1. Dependency & Toolchain Verification
 # ------------------------------------------------------------------------------
-log_info "Step 1/4: Checking system build prerequisites..."
-
-MISSING_TOOLS=()
+log_info "Step 1/3: Checking build toolchains..."
 
 # Check Rust / Cargo
 if command -v cargo &>/dev/null; then
-    RUST_VERSION="$(rustc --version 2>/dev/null || cargo --version)"
-    log_success "Found Rust toolchain: $RUST_VERSION"
+    log_success "Found Rust: $(cargo --version)"
 elif [ -f "$HOME/.cargo/bin/cargo" ]; then
     export PATH="$HOME/.cargo/bin:$PATH"
-    log_success "Found Rust toolchain in ~/.cargo/bin: $(cargo --version)"
+    log_success "Found Rust in ~/.cargo/bin: $(cargo --version)"
 else
-    log_warn "Rust/Cargo not detected in PATH."
-    echo -e "       To install Rust, run: ${CYAN}curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh${NC}"
-    MISSING_TOOLS+=("cargo")
+    log_warn "Rust/Cargo not detected. To install: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
 fi
 
-# Check Flutter / Dart
-if command -v flutter &>/dev/null; then
-    log_success "Found Flutter: $(flutter --version | head -n 1)"
-elif [ -f "$HOME/flutter/bin/flutter" ]; then
-    export PATH="$HOME/flutter/bin:$PATH"
-    log_success "Found Flutter in ~/flutter/bin: $(flutter --version | head -n 1)"
+# Check Java / JDK
+if command -v java &>/dev/null; then
+    log_success "Found Java: $(java -version 2>&1 | head -n 1)"
 else
-    log_warn "Flutter SDK not detected in PATH."
-    MISSING_TOOLS+=("flutter")
-fi
-
-# Check Python 3
-if command -v python3 &>/dev/null; then
-    log_success "Found Python: $(python3 --version)"
-else
-    log_warn "Python 3 not detected."
-    MISSING_TOOLS+=("python3")
-fi
-
-if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
-    echo ""
-    log_warn "Some build tools are missing (${MISSING_TOOLS[*]}). Proceeding with available targets..."
+    log_warn "JDK not detected. Install OpenJDK 17+ for Android Gradle builds."
 fi
 
 echo ""
@@ -95,18 +73,16 @@ echo ""
 # ------------------------------------------------------------------------------
 # 2. Build Host Daemon (Rust)
 # ------------------------------------------------------------------------------
-log_info "Step 2/4: Compiling Rust Host Daemon (zed-remote-daemon)..."
+log_info "Step 2/3: Compiling Rust Host Daemon (zed-remote-daemon)..."
 
 if command -v cargo &>/dev/null; then
     cd "$ROOT_DIR/daemon"
-    log_info "Running: cargo build --release"
+    log_info "Building release binary..."
     cargo build --release
     
     DAEMON_BIN="$ROOT_DIR/daemon/target/release/zed-remote-daemon"
     if [ -f "$DAEMON_BIN" ]; then
         log_success "Daemon compiled successfully: $DAEMON_BIN"
-        
-        # Optional installation to /usr/local/bin or ~/.local/bin
         INSTALL_DIR="$HOME/.local/bin"
         mkdir -p "$INSTALL_DIR"
         cp "$DAEMON_BIN" "$INSTALL_DIR/"
@@ -120,70 +96,32 @@ fi
 echo ""
 
 # ------------------------------------------------------------------------------
-# 3. Build Mobile App (Flutter APK / Bundle)
+# 3. Build Android Mobile App (Material 3 Jetpack Compose)
 # ------------------------------------------------------------------------------
-log_info "Step 3/4: Building Flutter Mobile Application (app/)..."
+log_info "Step 3/3: Building Jetpack Compose Android Client (android/)..."
 
-if command -v flutter &>/dev/null; then
-    cd "$ROOT_DIR/app"
-    
-    log_info "Fetching Flutter packages..."
-    flutter pub get
-    
-    log_info "Running flutter analyze..."
-    flutter analyze
-    
-    TARGET_BUILD="${1:-apk}"
-    
-    case "$TARGET_BUILD" in
-        apk)
-            log_info "Building release Android APK (flutter build apk --release)..."
-            if flutter build apk --release; then
-                APK_PATH="$ROOT_DIR/app/build/app/outputs/flutter-apk/app-release.apk"
-                log_success "APK created successfully: $APK_PATH"
-            else
-                log_warn "Android toolchain / Java not configured; building bundle or skipping full APK link."
-            fi
-            ;;
-        bundle)
-            log_info "Building release Android App Bundle (AAB)..."
-            flutter build appbundle --release
-            ;;
-        linux)
-            log_info "Building Linux Desktop Client..."
-            flutter build linux --release
-            ;;
-        web)
-            log_info "Building Progressive Web App (PWA)..."
-            flutter build web --release
-            ;;
-        *)
-            log_info "Building release APK..."
-            flutter build apk --release || true
-            ;;
-    esac
+if [ -f "$ROOT_DIR/android/gradlew" ]; then
+    cd "$ROOT_DIR/android"
+    chmod +x gradlew
+    TARGET="${1:-assembleDebug}"
+    log_info "Running: ./gradlew $TARGET"
+    if ./gradlew "$TARGET"; then
+        log_success "Android APK built successfully!"
+        find app/build/outputs/apk -name "*.apk" -type f 2>/dev/null | while read -r apk; do
+            log_success "Artifact: $apk"
+        done
+    else
+        log_warn "Gradle build did not complete. Check Android SDK and JDK settings."
+    fi
     cd "$ROOT_DIR"
-else
-    log_warn "Skipping Flutter app build (flutter not available)."
-fi
-
-echo ""
-
-# ------------------------------------------------------------------------------
-# 4. Generate Zero-Trust Pairing Credentials
-# ------------------------------------------------------------------------------
-log_info "Step 4/4: Initializing Zero-Knowledge Bunker Tunnel credentials..."
-
-if command -v python3 &>/dev/null && [ -f "$ROOT_DIR/daemon/scripts/bunker_tunnel.py" ]; then
-    python3 "$ROOT_DIR/daemon/scripts/bunker_tunnel.py" pair
 fi
 
 echo ""
 echo -e "${GREEN}${BOLD}========================================================================${NC}"
 echo -e "${GREEN}${BOLD}                 ZED REMOTE COMPILATION FINISHED!                       ${NC}"
 echo -e "${GREEN}${BOLD}========================================================================${NC}"
-echo -e "Next Steps:"
-echo -e "  1. Start the encrypted tunnel:  ${CYAN}python3 daemon/scripts/bunker_tunnel.py run${NC}"
-echo -e "  2. Start the daemon in Zed or:  ${CYAN}~/.local/bin/zed-remote-daemon --port 8443${NC}"
-echo -e "  3. Scan the terminal QR code in your mobile app to link instantly off-the-grid!"
+echo -e "Helpful commands:"
+echo -e "  1. Inject daemon into official Zed: ${CYAN}./tools/inject-daemon.sh${NC}"
+echo -e "  2. Start bunker tunnel (Fortinet bypass): ${CYAN}./tools/bunker-tunnel.sh${NC}"
+echo -e "  3. Sync Zed GitHub fork:            ${CYAN}./tools/sync-zed-fork.sh${NC}"
 echo -e "${GREEN}${BOLD}========================================================================${NC}\n"

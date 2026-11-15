@@ -24,6 +24,15 @@ app/android/local.properties
 app/android/app/build/
 **/*.pub-cache/
 
+# Android Jetpack Compose Build Artifacts
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/**/*.apk
+android/**/*.aab
+
 # Runtime / Session Logs & Secret Keys
 *.log
 .zed-remote/sessions/
@@ -46,3 +55,7 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+
+# Agent skills directory
+skills/
+.agents/
