@@ -1,0 +1,14 @@
+id = "zed-remote"
+name = "Zed Remote"
+version = "0.1.0"
+schema_version = 1
+authors = ["Sujay Seeram <seeramsujay@gmail.com>"]
+description = "Control your Zed AI sessions, approve agent tool permissions, and execute Git workflows directly from your phone over an encrypted bunker tunnel."
+repository = "https://github.com/seeramsujay/remote-zed"
+
+[context_servers.zed-remote]
+name = "Zed Remote MCP & Mobile Bridge"
+
+[slash_commands.bunker]
+description = "Display active Zed Remote encrypted bunker tunnel pairing status"
+tooltip_text = "Show Zed Remote connection credentials and tunnel QR"

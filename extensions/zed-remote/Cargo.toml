@@ -1,0 +1,12 @@
+[package]
+name = "zed-remote-extension"
+version = "0.1.0"
+edition = "2021"
+authors = ["Sujay Seeram <seeramsujay@gmail.com>"]
+description = "Zed Remote Dev Extension bridging Zed with mobile clients over encrypted tunnels"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+zed_extension_api = "0.2.0"
