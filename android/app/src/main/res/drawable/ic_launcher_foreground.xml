@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Zeb, the app mascot (see Mascot.kt), drawn on its 196 x 134 grid and centred in the
+     adaptive icon's 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.3"
+        android:scaleY="0.3"
+        android:translateX="24.6"
+        android:translateY="33.9">
+        <path
+            android:fillColor="#FF6E56CF"
+            android:pathData="M14,0H182V52H196V80H182V112H154V134H140V112H56V134H42V112H14V80H0V52H14Z" />
+        <path
+            android:fillColor="#FF1C1336"
+            android:pathData="M66,40a9,9 0 0 1 9,9v8a9,9 0 0 1 -18,0v-8a9,9 0 0 1 9,-9ZM130,40a9,9 0 0 1 9,9v8a9,9 0 0 1 -18,0v-8a9,9 0 0 1 9,-9Z" />
+    </group>
+</vector>

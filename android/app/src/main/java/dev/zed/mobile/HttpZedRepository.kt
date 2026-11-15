@@ -1,0 +1,900 @@
+package dev.zed.mobile
+
+import com.google.gson.JsonArray
+import com.google.gson.JsonElement
+import com.google.gson.JsonNull
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.ConnectionPool
+import okhttp3.HttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+
+/**
+ * Device-authenticated Zed API client. Its public constructor preserves the v1 host/token flow;
+ * use [v2] after a successful QR claim to use the same operations under `/v2`.
+ */
+class HttpZedRepository private constructor(
+    host: String,
+    credential: String,
+    debug: Boolean,
+    private val apiVersion: Int,
+    private val client: OkHttpClient,
+) : ZedRepository {
+    private val origin = HostPolicy.parse(host, debug)
+    private val bearer = HostPolicy.token(credential)
+
+    constructor(host: String, token: String, debug: Boolean) : this(
+        host = host,
+        credential = token,
+        debug = debug,
+        apiVersion = API_VERSION_V1,
+        client = newZedHttpClient(),
+    )
+
+    override suspend fun checkStatus() {
+        val value = request("GET", listOf("status"))
+        if (value.number("api_version") != apiVersion || value.string("name") != "Zed-Desktop") {
+            throw GatewayException("Incompatible desktop. Expected Zed-Desktop API v$apiVersion.")
+        }
+    }
+
+    override suspend fun projects(): List<Project> {
+        val segments = if (apiVersion == API_VERSION_V2) {
+            listOf("projects", "catalog")
+        } else {
+            listOf("projects")
+        }
+        return request("GET", segments).objects("projects").map { it.project() }
+    }
+
+    override suspend fun openProject(id: String): Project {
+        if (apiVersion != API_VERSION_V2) {
+            throw GatewayException("Remote project opening requires Zed-Desktop Mobile Gateway API v2.")
+        }
+        return request("POST", listOf("projects", "catalog", id, "open")).project()
+    }
+
+    override suspend fun threads(projectId: String) = request("GET", listOf("projects", projectId, "threads"))
+        .objects("threads").map { it.summary() }
+
+    override suspend fun thread(id: String): ThreadSnapshot {
+        val obj = request("GET", listOf("threads", id))
+        return ThreadSnapshot(
+            id = obj.string("id"),
+            title = obj.string("title"),
+            status = obj.string("status"),
+            messages = obj.objects("messages").map { Message(it.string("role"), it.string("text")) },
+            transcript = obj.optionalObjects("transcript").map { it.transcriptEntry() },
+            transcriptOmittedEntries = obj.optionalNumber("transcript_omitted_entries") ?: 0,
+            errorMessage = obj.optionalString("error_message"),
+        )
+    }
+
+    override suspend fun olderTranscript(id: String, before: Int): TranscriptPage {
+        requireV2("Older transcript entries")
+        val page = request(
+            "GET",
+            listOf("threads", id, "transcript"),
+            query = mapOf("before" to before.toString(), "limit" to TRANSCRIPT_PAGE_SIZE.toString()),
+        )
+        return TranscriptPage(
+            entries = page.objects("entries").map { it.transcriptEntry() },
+            omittedEntries = page.number("omitted_entries"),
+        )
+    }
+
+    override suspend fun createThread(projectId: String) = createThread(projectId, null)
+
+    override suspend fun createThread(projectId: String, agentId: String?): ThreadSummary {
+        if (agentId != null) requireV2("External agents")
+        return request(
+            "POST",
+            listOf("threads"),
+            JsonObject().apply {
+                addProperty("project_id", projectId)
+                agentId?.let { addProperty("agent_id", it) }
+            },
+        ).summary()
+    }
+
+    override suspend fun agents(projectId: String): List<AgentInfo> {
+        requireV2("External agents")
+        return request("GET", listOf("projects", projectId, "agents")).objects("agents").map { it.agentInfo() }
+    }
+
+    override suspend fun setAgentMode(id: String, modeId: String): ThreadConfiguration {
+        requireV2("External agents")
+        val body = JsonObject().apply { addProperty("mode_id", modeId) }
+        return request("PUT", listOf("threads", id, "configuration"), body).threadConfiguration()
+    }
+
+    override suspend fun setAgentOption(id: String, optionId: String, value: AgentOptionValue): ThreadConfiguration {
+        requireV2("External agents")
+        val body = JsonObject().apply {
+            add("config_option", JsonObject().apply {
+                addProperty("id", optionId)
+                when (value) {
+                    is AgentOptionValue.Choice -> addProperty("value", value.value)
+                    is AgentOptionValue.Toggle -> addProperty("value", value.value)
+                }
+            })
+        }
+        return request("PUT", listOf("threads", id, "configuration"), body).threadConfiguration()
+    }
+
+    override suspend fun send(id: String, text: String) {
+        accepted(
+            request(
+                "POST",
+                listOf("threads", id, "messages"),
+                JsonObject().apply { addProperty("text", text) },
+            ),
+        )
+    }
+
+    override suspend fun cancel(id: String) {
+        accepted(request("POST", listOf("threads", id, "cancel")))
+    }
+
+    override suspend fun changes(id: String) = changesSnapshot(id).files
+
+    override suspend fun changesSnapshot(id: String): ChangesSnapshot {
+        val value = request("GET", listOf("threads", id, "changes"))
+        val review = value.get("review")?.takeIf { it.isJsonObject }?.asJsonObject
+        return ChangesSnapshot(
+            files = value.objects("files").map {
+                ChangedFile(
+                    path = it.string("path"),
+                    diff = it.string("diff"),
+                    additions = it.number("additions"),
+                    deletions = it.number("deletions"),
+                    truncated = it.optionalBoolean("truncated") ?: false,
+                    unreviewed = it.optionalBoolean("unreviewed") ?: false,
+                )
+            },
+            unreviewedFiles = review?.optionalStrings("unreviewed_files").orEmpty(),
+            canUndoReject = review?.optionalBoolean("can_undo_reject") ?: false,
+        )
+    }
+
+    override suspend fun changedFilePage(id: String, path: String, offset: Int): DiffPage {
+        requireV2("Paged diffs")
+        val value = request(
+            "GET",
+            listOf("threads", id, "changes", "file"),
+            query = mapOf("path" to path, "offset" to offset.toString()),
+        )
+        return DiffPage(
+            path = value.string("path"),
+            diff = value.string("diff"),
+            offset = value.number("offset"),
+            nextOffset = value.optionalNumber("next_offset"),
+            totalLines = value.number("total_lines"),
+        )
+    }
+
+    override suspend fun reviewChanges(id: String, keep: Boolean, paths: List<String>?) {
+        requireV2("Reviewing edits")
+        val body = JsonObject().apply {
+            addProperty("action", if (keep) "keep" else "reject")
+            paths?.let { add("paths", JsonArray().apply { it.forEach(::add) }) }
+        }
+        accepted(request("POST", listOf("threads", id, "changes", "review"), body))
+    }
+
+    override suspend fun undoReject(id: String) {
+        requireV2("Reviewing edits")
+        accepted(request("POST", listOf("threads", id, "changes", "undo-reject")))
+    }
+
+    override suspend fun toolDetails(threadId: String, toolCallId: String): ToolDetails {
+        if (apiVersion != API_VERSION_V2) {
+            throw GatewayException("Tool output details require Zed-Desktop Mobile Gateway API v2.")
+        }
+        return request("GET", listOf("threads", threadId, "tool-calls", toolCallId, "output")).toolDetails()
+    }
+
+    override suspend fun models(projectId: String): List<ModelCapability> = request(
+        "GET",
+        listOf("projects", projectId, "models"),
+    ).objects("models").map { it.modelCapability() }
+
+    override suspend fun configuration(id: String): ThreadConfiguration = request(
+        "GET",
+        listOf("threads", id, "configuration"),
+    ).threadConfiguration()
+
+    override suspend fun updateConfiguration(
+        id: String,
+        model: ModelCapability?,
+        thinkingEnabled: Boolean?,
+        thinkingEffort: String?,
+        clearThinkingEffort: Boolean,
+    ): ThreadConfiguration {
+        require(model != null || thinkingEnabled != null || thinkingEffort != null || clearThinkingEffort) {
+            "Choose a model, thinking setting, or thinking effort first."
+        }
+        val body = JsonObject().apply {
+            model?.let {
+                add("model", JsonObject().apply {
+                    addProperty("provider_id", it.providerId)
+                    addProperty("model_id", it.modelId)
+                })
+            }
+            thinkingEnabled?.let { addProperty("thinking_enabled", it) }
+            when {
+                thinkingEffort != null -> addProperty("thinking_effort", thinkingEffort)
+                clearThinkingEffort -> add("thinking_effort", JsonNull.INSTANCE)
+            }
+        }
+        return request("PUT", listOf("threads", id, "configuration"), body).threadConfiguration()
+    }
+
+    override suspend fun approvals(id: String): List<ToolApproval> = request(
+        "GET",
+        listOf("threads", id, "approvals"),
+    ).objects("approvals").map { approval ->
+        ToolApproval(
+            toolCallId = approval.string("tool_call_id"),
+            title = approval.string("title"),
+            toolName = approval.optionalString("tool_name"),
+            content = approval.optionalStrings("content"),
+            rawInput = approval.optionalValue("raw_input"),
+            allowOnceAvailable = approval.bool("allow_once_available"),
+            denyOnceAvailable = approval.bool("deny_once_available"),
+            kind = approval.optionalString("kind") ?: "permission",
+            options = approval.optionalObjects("options").map {
+                PermissionChoice(
+                    optionId = it.string("option_id"),
+                    label = it.string("label"),
+                    kind = it.string("kind"),
+                    enabled = it.optionalBoolean("enabled") ?: true,
+                )
+            },
+            patterns = approval.optionalObjects("patterns").map {
+                PermissionPattern(it.number("index"), it.string("pattern"), it.string("display_name"))
+            },
+            allowBlockedReason = approval.optionalString("allow_blocked_reason"),
+        )
+    }
+
+    override suspend fun resolveApproval(id: String, toolCallId: String, decision: ApprovalDecision) {
+        requireV2("Tool approval options")
+        val body = JsonObject().apply {
+            addProperty("option_id", decision.optionId)
+            if (decision.patterns.isNotEmpty()) {
+                add("patterns", JsonArray().apply { decision.patterns.forEach(::add) })
+            }
+        }
+        accepted(request("POST", listOf("threads", id, "approvals", toolCallId, "resolve"), body))
+    }
+
+    override suspend fun elicitations(id: String): List<Elicitation> {
+        requireV2("Agent questions")
+        return request("GET", listOf("threads", id, "elicitations")).objects("elicitations").map { it.elicitation() }
+    }
+
+    override suspend fun answerElicitation(
+        id: String,
+        elicitationId: String,
+        action: String,
+        values: Map<String, ElicitationValue>,
+    ) {
+        requireV2("Agent questions")
+        require(action in setOf("accept", "decline", "cancel")) { "Unsupported answer action." }
+        val body = JsonObject().apply {
+            addProperty("action", action)
+            if (action == "accept") {
+                add("content", JsonObject().apply {
+                    values.forEach { (name, value) ->
+                        when (value) {
+                            is ElicitationValue.Text -> addProperty(name, value.value)
+                            is ElicitationValue.Flag -> addProperty(name, value.value)
+                            is ElicitationValue.Choices -> add(name, JsonArray().apply { value.values.forEach(::add) })
+                        }
+                    }
+                })
+            }
+        }
+        accepted(request("POST", listOf("threads", id, "elicitations", elicitationId, "respond"), body))
+    }
+
+    override suspend fun resolveApproval(id: String, toolCallId: String, allow: Boolean) {
+        accepted(
+            request(
+                "POST",
+                listOf("threads", id, "approvals", toolCallId, "resolve"),
+                JsonObject().apply { addProperty("decision", if (allow) "allow" else "deny") },
+            ),
+        )
+    }
+
+    override suspend fun revokeCurrentDevice() {
+        if (apiVersion != API_VERSION_V2) return
+        val response = request("POST", listOf("devices", "current", "revoke"))
+        val value = response.get("revoked")
+        if (value == null || !value.isJsonPrimitive || !value.asBoolean) {
+            throw GatewayException("Desktop did not revoke this device.")
+        }
+    }
+
+    override suspend fun terminalExec(command: String): TerminalExecResponse {
+        val body = JsonObject().apply { addProperty("command", command) }
+        val response = request("POST", listOf("terminal", "exec"), body)
+        val stdout = response.get("stdout")?.asString ?: ""
+        val stderr = response.get("stderr")?.asString ?: ""
+        val exitCode = response.get("exit_code")?.asInt ?: response.get("exitCode")?.asInt ?: 0
+        val cwd = response.get("cwd")?.asString
+        return TerminalExecResponse(stdout, stderr, exitCode, cwd)
+    }
+
+    override suspend fun fsList(path: String?): FsDirectoryResult {
+        val query = if (path != null) mapOf("path" to path) else emptyMap()
+        val response = request("GET", listOf("fs", "list"), null, query)
+        val currentPath = response.get("current_path")?.asString ?: response.get("currentPath")?.asString ?: (path ?: "/home")
+        val parentPath = response.get("parent_path")?.asString ?: response.get("parentPath")?.asString
+        val items = response.getAsJsonArray("items")?.mapNotNull { itemElem ->
+            val obj = itemElem.asJsonObject
+            RemoteFileItem(
+                name = obj.get("name")?.asString ?: return@mapNotNull null,
+                path = obj.get("path")?.asString ?: return@mapNotNull null,
+                isDirectory = obj.get("is_dir")?.asBoolean ?: obj.get("is_directory")?.asBoolean ?: false,
+                sizeBytes = obj.get("size")?.asLong ?: obj.get("size_bytes")?.asLong,
+                modified = obj.get("modified")?.asString,
+            )
+        } ?: emptyList()
+        return FsDirectoryResult(currentPath, parentPath, items)
+    }
+
+    override suspend fun fsMkdir(path: String): String {
+        val body = JsonObject().apply { addProperty("path", path) }
+        val response = request("POST", listOf("fs", "mkdir"), body)
+        return response.get("path")?.asString ?: path
+    }
+
+    override suspend fun workspaceSet(path: String): String {
+        val body = JsonObject().apply { addProperty("path", path) }
+        val response = request("POST", listOf("workspace", "set"), body)
+        return response.get("workspace")?.asString ?: path
+    }
+
+    private fun requireV2(feature: String) {
+        if (apiVersion != API_VERSION_V2) {
+            throw GatewayException("$feature requires Zed-Desktop Mobile Gateway API v2.")
+        }
+    }
+
+    private fun accepted(obj: JsonObject) {
+        val value = obj.get("accepted")
+        if (value == null || !value.isJsonPrimitive || !value.asJsonPrimitive.isBoolean || !value.asBoolean) {
+            throw GatewayException("Desktop did not accept the request.")
+        }
+    }
+
+    private suspend fun request(
+        method: String,
+        segments: List<String>,
+        body: JsonObject? = null,
+        query: Map<String, String> = emptyMap(),
+    ): JsonObject {
+        require(segments.none { it.isEmpty() || it == "." || it == ".." }) {
+            "Desktop returned an invalid empty or dot-segment ID."
+        }
+        require(method in setOf("GET", "POST", "PUT")) { "Unsupported desktop request method." }
+        val url = origin.newBuilder().addPathSegment("v$apiVersion").apply {
+            segments.forEach { addPathSegment(it) }
+            query.forEach { (key, value) -> addQueryParameter(key, value) }
+        }.build()
+        val requestBody = when (method) {
+            "POST", "PUT" -> (body?.toString() ?: "{}").toRequestBody(JSON_MEDIA_TYPE)
+            else -> null
+        }
+        val call = client.newCall(
+            Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $bearer")
+                .header("Accept", "application/json")
+                .method(method, requestBody)
+                .build(),
+        )
+        val rejectedMessage = if (apiVersion == API_VERSION_V1) {
+            "Pairing rejected. Check or rotate your desktop token."
+        } else {
+            "Device credential rejected. Pair this device again."
+        }
+        return executeJson(call, rejectedMessage, apiVersion == API_VERSION_V2)
+    }
+
+    companion object {
+        private const val API_VERSION_V1 = 1
+        private const val API_VERSION_V2 = 2
+        private const val TRANSCRIPT_PAGE_SIZE = 200
+
+        /** Creates a v2 device-authenticated repository from a saved claim response. */
+        fun v2(
+            credential: DeviceCredential,
+            debug: Boolean,
+            client: OkHttpClient = newZedHttpClient(),
+        ): HttpZedRepository = HttpZedRepository(
+            host = credential.origin,
+            credential = credential.credential,
+            debug = debug,
+            apiVersion = API_VERSION_V2,
+            client = client,
+        )
+
+        /** Kept for callers that do not retain the device ID, such as focused HTTP tests. */
+        fun v2(
+            host: String,
+            credential: String,
+            debug: Boolean,
+            client: OkHttpClient = newZedHttpClient(),
+        ): HttpZedRepository = HttpZedRepository(
+            host = host,
+            credential = credential,
+            debug = debug,
+            apiVersion = API_VERSION_V2,
+            client = client,
+        )
+    }
+}
+
+/**
+ * Unauthenticated one-time pairing client. Only `POST /v2/pair/claim` is sent without a bearer.
+ */
+class V2PairingRepository(
+    origin: String,
+    private val debug: Boolean,
+    private val client: OkHttpClient = newZedHttpClient(),
+) : PairingRepository {
+    private val origin: HttpUrl = HostPolicy.parse(origin, debug)
+
+    override suspend fun claim(ticket: PairingTicket, deviceLabel: String): DeviceCredential {
+        V2PairingValidation.ticket(ticket, debug)
+        require(HostPolicy.parse(ticket.origin, debug) == origin) {
+            "The pairing ticket origin does not match the pairing endpoint."
+        }
+        V2PairingValidation.deviceLabel(deviceLabel)
+        val body = JsonObject().apply {
+            addProperty("ticket_id", ticket.ticketId)
+            addProperty("secret", ticket.secret)
+            addProperty("device_label", deviceLabel)
+        }.toString().toRequestBody(JSON_MEDIA_TYPE)
+        val url = origin.newBuilder()
+            .addPathSegment("v2")
+            .addPathSegment("pair")
+            .addPathSegment("claim")
+            .build()
+        val response = executeJson(
+            client.newCall(
+                Request.Builder()
+                    .url(url)
+                    .header("Accept", "application/json")
+                    .post(body)
+                    .build(),
+            ),
+            "Pairing ticket rejected or expired.",
+            deviceAuthentication = false,
+        )
+        val credential = DeviceCredential(
+            origin = ticket.origin,
+            deviceId = response.string("device_id"),
+            credential = response.string("credential"),
+        )
+        V2PairingValidation.deviceCredential(credential, debug)
+        return credential
+    }
+}
+
+private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+private const val MAX_RESPONSE_BYTES = 4L * 1024 * 1024
+
+private fun newZedHttpClient(): OkHttpClient = OkHttpClient.Builder()
+    .followRedirects(false)
+    .followSslRedirects(false)
+    .retryOnConnectionFailure(false)
+    // The gateway closes idle connections after 15 seconds. Retries are disabled so actions are
+    // never replayed, so evict pooled connections before the gateway does instead of reusing a
+    // closed one.
+    .connectionPool(ConnectionPool(5, 10, TimeUnit.SECONDS))
+    .connectTimeout(10, TimeUnit.SECONDS)
+    .readTimeout(20, TimeUnit.SECONDS)
+    .callTimeout(30, TimeUnit.SECONDS)
+    .build()
+
+private suspend fun executeJson(
+    call: Call,
+    rejectedMessage: String,
+    deviceAuthentication: Boolean,
+): JsonObject = withContext(Dispatchers.IO) {
+    val payload: String = suspendCancellableCoroutine { continuation ->
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, error: IOException) {
+                if (continuation.isActive) {
+                    continuation.resumeWithException(
+                        GatewayException(
+                            "Connection failed. Check Tailscale, host, and TLS. " +
+                                    "An action may have reached desktop; refresh before retrying.",
+                        ),
+                    )
+                }
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    val text = response.use {
+                        val source = it.body?.source() ?: throw GatewayException("Desktop returned an empty response.")
+                        if (source.request(MAX_RESPONSE_BYTES + 1)) {
+                            throw GatewayException("Response exceeds 4 MiB. Open this thread on desktop.")
+                        }
+                        val raw = source.readUtf8()
+                        if (!it.isSuccessful) throw responseFailure(it.code, raw, rejectedMessage, deviceAuthentication)
+                        raw
+                    }
+                    if (continuation.isActive) continuation.resume(text)
+                } catch (error: Exception) {
+                    if (continuation.isActive) {
+                        continuation.resumeWithException(
+                            if (error is GatewayException) error
+                            else GatewayException("Unable to read desktop response. Refresh before retrying an action."),
+                        )
+                    }
+                }
+            }
+        })
+    }
+    try {
+        JsonParser.parseString(payload).asJsonObject
+    } catch (_: Exception) {
+        throw GatewayException("Desktop returned invalid JSON.")
+    }
+}
+
+private fun responseFailure(
+    code: Int,
+    raw: String,
+    rejectedMessage: String,
+    deviceAuthentication: Boolean,
+): GatewayException {
+    val detail = runCatching { JsonParser.parseString(raw).asJsonObject.string("error") }.getOrNull()
+    val explanation = when (code) {
+        401, 403 -> rejectedMessage
+        in 300..399 -> "Redirect refused. Pair with the final host URL directly."
+        else -> detail?.take(500) ?: "Desktop request failed."
+    }
+    val message = "HTTP $code: $explanation"
+    return if (deviceAuthentication && code in 401..403) {
+        GatewayAuthenticationException(message)
+    } else {
+        GatewayException(message)
+    }
+}
+
+private fun JsonObject.string(key: String): String {
+    val value = get(key)
+    if (value == null || !value.isJsonPrimitive || !value.asJsonPrimitive.isString) {
+        throw GatewayException("Invalid desktop string '$key'.")
+    }
+    return value.asString
+}
+
+private fun JsonObject.optionalString(key: String): String? {
+    val value = get(key) ?: return null
+    if (value.isJsonNull) return null
+    if (!value.isJsonPrimitive || !value.asJsonPrimitive.isString) {
+        throw GatewayException("Invalid desktop string '$key'.")
+    }
+    return value.asString
+}
+
+private fun JsonObject.number(key: String): Int {
+    val value = get(key)
+    if (value == null || !value.isJsonPrimitive || !value.asJsonPrimitive.isNumber) {
+        throw GatewayException("Invalid desktop integer '$key'.")
+    }
+    return value.asString.toIntOrNull() ?: throw GatewayException("Invalid desktop integer '$key'.")
+}
+
+private fun JsonObject.optionalNumber(key: String): Int? {
+    val value = get(key) ?: return null
+    if (value.isJsonNull) return null
+    if (!value.isJsonPrimitive || !value.asJsonPrimitive.isNumber) {
+        throw GatewayException("Invalid desktop integer '$key'.")
+    }
+    return value.asString.toIntOrNull() ?: throw GatewayException("Invalid desktop integer '$key'.")
+}
+
+private fun JsonObject.bool(key: String): Boolean {
+    val value = get(key)
+    if (value == null || !value.isJsonPrimitive || !value.asJsonPrimitive.isBoolean) {
+        throw GatewayException("Invalid desktop boolean '$key'.")
+    }
+    return value.asBoolean
+}
+
+private fun JsonObject.optionalBoolean(key: String): Boolean? {
+    val value = get(key) ?: return null
+    if (value.isJsonNull) return null
+    if (!value.isJsonPrimitive || !value.asJsonPrimitive.isBoolean) {
+        throw GatewayException("Invalid desktop boolean '$key'.")
+    }
+    return value.asBoolean
+}
+
+private fun JsonObject.objects(key: String): List<JsonObject> {
+    val value = get(key)
+    if (value == null || !value.isJsonArray || value.asJsonArray.any { !it.isJsonObject }) {
+        throw GatewayException("Invalid desktop array '$key'.")
+    }
+    return value.asJsonArray.map { it.asJsonObject }
+}
+
+private fun JsonObject.optionalObjects(key: String): List<JsonObject> {
+    val value = get(key) ?: return emptyList()
+    if (!value.isJsonArray || value.asJsonArray.any { !it.isJsonObject }) {
+        throw GatewayException("Invalid desktop array '$key'.")
+    }
+    return value.asJsonArray.map { it.asJsonObject }
+}
+
+private fun JsonObject.optionalStrings(key: String): List<String> {
+    val value = get(key) ?: return emptyList()
+    if (!value.isJsonArray || value.asJsonArray.any { !it.isJsonPrimitive || !it.asJsonPrimitive.isString }) {
+        throw GatewayException("Invalid desktop string array '$key'.")
+    }
+    return value.asJsonArray.map { it.asString }
+}
+
+private fun JsonObject.optionalValue(key: String): String? {
+    val value = get(key) ?: return null
+    return if (value.isJsonNull) null else value.toString()
+}
+
+private fun JsonObject.summary() = ThreadSummary(
+    id = string("id"),
+    title = string("title"),
+    status = string("status"),
+    agent = optionalObject("agent")?.agentInfo(),
+    errorMessage = optionalString("error_message"),
+)
+
+private fun JsonObject.optionalObject(key: String): JsonObject? {
+    val value = get(key) ?: return null
+    if (value.isJsonNull) return null
+    if (!value.isJsonObject) throw GatewayException("Invalid desktop response field: $key")
+    return value.asJsonObject
+}
+
+private fun JsonObject.agentInfo() = AgentInfo(
+    id = string("id"),
+    name = string("name"),
+    isNative = bool("is_native"),
+)
+
+private fun JsonObject.agentConfigOption(): AgentConfigOption? {
+    val type = string("type")
+    return when (type) {
+        AGENT_OPTION_SELECT -> AgentConfigOption(
+            id = string("id"),
+            name = string("name"),
+            description = optionalString("description"),
+            category = optionalString("category"),
+            type = type,
+            currentValue = string("current_value"),
+            values = objects("values").map {
+                AgentConfigValue(
+                    value = it.string("value"),
+                    name = it.string("name"),
+                    description = it.optionalString("description"),
+                    group = it.optionalString("group"),
+                )
+            },
+        )
+        AGENT_OPTION_BOOLEAN -> AgentConfigOption(
+            id = string("id"),
+            name = string("name"),
+            description = optionalString("description"),
+            category = optionalString("category"),
+            type = type,
+            currentBoolean = bool("current_value"),
+        )
+        // A newer desktop may report option kinds this app cannot edit; hide rather than guess.
+        else -> null
+    }
+}
+
+private fun JsonObject.project(): Project {
+    val kind = optionalString("kind") ?: PROJECT_KIND_LOCAL
+    if (kind !in PROJECT_KINDS) {
+        throw GatewayException("Invalid desktop project kind '$kind'.")
+    }
+    return Project(
+        id = string("id"),
+        name = string("name"),
+        path = string("path"),
+        // Older gateways only returned active workspaces, so absence means ready/open.
+        isOpen = optionalBoolean("is_open") ?: true,
+        // The source metadata is optional so catalogs from pre-remote gateways remain readable.
+        kind = kind,
+        connectionName = optionalString("connection_name"),
+        opening = optionalBoolean("opening") ?: false,
+    )
+}
+
+private fun JsonObject.transcriptEntry(): TranscriptEntry {
+    val kind = string("kind")
+    val chunks = optionalObjects("chunks").map {
+        TranscriptChunk(it.string("kind"), it.string("text"))
+    }
+    val planEntries = optionalObjects("entries").map {
+        PlanEntry(it.string("text"), it.string("status"))
+    }
+    val content = optionalStrings("content")
+    val rawOutput = optionalValue("raw_output")
+    return TranscriptEntry(
+        index = number("index"),
+        kind = kind,
+        text = optionalString("text"),
+        chunks = chunks,
+        toolCallId = optionalString("tool_call_id"),
+        // Older desktops embedded output in snapshots. Prefer new compact metadata, but preserve
+        // this fallback while a paired desktop and phone are upgraded at different times.
+        detailsAvailable = optionalBoolean("details_available") ?: (rawOutput != null || content.isNotEmpty()),
+        title = optionalString("title"),
+        toolName = optionalString("tool_name"),
+        status = optionalString("status"),
+        content = content,
+        rawInput = optionalValue("raw_input"),
+        rawOutput = rawOutput,
+        planEntries = planEntries,
+        elicitationId = optionalString("elicitation_id"),
+    )
+}
+
+private fun JsonObject.elicitation(): Elicitation {
+    val mode = string("mode")
+    val schema = get("schema")?.takeIf { it.isJsonObject }?.asJsonObject
+    return Elicitation(
+        id = string("elicitation_id"),
+        message = string("message"),
+        mode = mode,
+        url = optionalString("url"),
+        fields = schema?.let(::elicitationFields).orEmpty(),
+    )
+}
+
+/**
+ * Reads the subset of JSON Schema the Agent protocol allows for questions. Desktop validates the
+ * answer again, so an unknown property type is skipped rather than guessed at.
+ */
+internal fun elicitationFields(schema: JsonObject): List<ElicitationField> {
+    val properties = schema.get("properties")?.takeIf { it.isJsonObject }?.asJsonObject ?: return emptyList()
+    val required = schema.get("required")?.takeIf { it.isJsonArray }?.asJsonArray
+        ?.mapNotNull { element -> element.takeIf { it.isJsonPrimitive }?.asString }
+        .orEmpty()
+        .toSet()
+    return properties.entrySet().mapNotNull { (name, element) ->
+        val property = element.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+        val title = property.textOrNull("title") ?: name
+        val description = property.textOrNull("description")
+        val isRequired = name in required
+        when (property.textOrNull("type")) {
+            "string" -> {
+                val choices = property.choices("oneOf") ?: property.enumChoices("enum")
+                if (choices.isNullOrEmpty()) {
+                    ElicitationField(name, title, description, ElicitationFieldType.TEXT, isRequired,
+                        defaultText = property.textOrNull("default"))
+                } else {
+                    ElicitationField(name, title, description, ElicitationFieldType.SINGLE_SELECT, isRequired,
+                        choices = choices, defaultText = property.textOrNull("default"))
+                }
+            }
+            "number", "integer" -> ElicitationField(
+                name, title, description,
+                if (property.textOrNull("type") == "integer") ElicitationFieldType.INTEGER else ElicitationFieldType.NUMBER,
+                isRequired,
+                defaultText = property.get("default")?.takeIf { it.isJsonPrimitive }?.asString,
+            )
+            "boolean" -> ElicitationField(name, title, description, ElicitationFieldType.BOOLEAN, isRequired,
+                defaultBoolean = property.get("default")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }?.asBoolean)
+            "array" -> {
+                val items = property.get("items")?.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+                val choices = items.choices("anyOf") ?: items.enumChoices("enum") ?: return@mapNotNull null
+                ElicitationField(name, title, description, ElicitationFieldType.MULTI_SELECT, isRequired,
+                    choices = choices,
+                    defaultChoices = property.get("default")?.takeIf { it.isJsonArray }?.asJsonArray
+                        ?.mapNotNull { item -> item.takeIf { it.isJsonPrimitive }?.asString }.orEmpty())
+            }
+            else -> null
+        }
+    }
+}
+
+private fun JsonObject.textOrNull(key: String): String? =
+    get(key)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+
+private fun JsonObject.choices(key: String): List<ElicitationChoice>? =
+    get(key)?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { element ->
+        val option = element.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+        val value = option.textOrNull("const") ?: return@mapNotNull null
+        ElicitationChoice(value, option.textOrNull("title") ?: value, option.textOrNull("description"))
+    }
+
+private fun JsonObject.enumChoices(key: String): List<ElicitationChoice>? =
+    get(key)?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { element ->
+        element.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString?.let { ElicitationChoice(it, it) }
+    }
+
+private fun JsonObject.toolDetails(): ToolDetails {
+    val toolCallId = string("tool_call_id")
+    val status = string("status")
+    val available = bool("available")
+    if (!available) {
+        return ToolDetails(toolCallId = toolCallId, status = status, available = false)
+    }
+
+    val format = string("format")
+    if (format != "markdown") {
+        throw GatewayException("Unsupported desktop tool output format '$format'.")
+    }
+    return ToolDetails(
+        toolCallId = toolCallId,
+        status = status,
+        available = true,
+        format = format,
+        output = string("output"),
+        truncated = bool("truncated"),
+    )
+}
+
+private fun JsonObject.modelCapability(): ModelCapability = ModelCapability(
+    providerId = string("provider_id"),
+    providerName = string("provider_name"),
+    modelId = string("model_id"),
+    modelName = string("model_name"),
+    supportsThinking = bool("supports_thinking"),
+    supportsDisablingThinking = bool("supports_disabling_thinking"),
+    effortLevels = objects("effort_levels").map {
+        ThinkingEffort(it.string("name"), it.string("value"), it.bool("is_default"))
+    },
+)
+
+private fun JsonObject.threadConfiguration(): ThreadConfiguration {
+    val model = get("model")
+    val selectedModel = when {
+        model == null || model.isJsonNull -> null
+        model.isJsonObject -> model.asJsonObject.modelCapability()
+        else -> throw GatewayException("Invalid desktop thread model.")
+    }
+    val modes = optionalObject("modes")?.let { modes ->
+        AgentModes(
+            current = modes.string("current"),
+            available = modes.objects("available").map {
+                AgentMode(it.string("id"), it.string("name"), it.optionalString("description"))
+            },
+        )
+    }
+    return ThreadConfiguration(
+        model = selectedModel,
+        // External agents report no native thinking fields.
+        thinkingEnabled = optionalBoolean("thinking_enabled") ?: false,
+        thinkingEffort = optionalString("thinking_effort"),
+        agent = optionalObject("agent")?.agentInfo(),
+        modes = modes,
+        options = optionalObjects("options").mapNotNull { it.agentConfigOption() },
+    )
+}
