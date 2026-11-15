@@ -372,5 +372,6 @@ internal object Symbols {
     val Settings: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.lc_settings)
     val Sparkles: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.lc_sparkles)
     val Stop: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.lc_square)
+    val Terminal: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.lc_sliders_horizontal)
     val Tune: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.lc_sliders_horizontal)
 }

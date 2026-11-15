@@ -42,10 +42,13 @@ class AgentService {
 
   /// Responds to a pending permission request.
   void respondPermission(dynamic requestId, bool approved, [String? reason]) {
-    client.sendResponse(requestId, {
+    final payload = <String, dynamic>{
       'decision': approved ? 'approved' : 'rejected',
-      'reason': ?reason,
-    });
+    };
+    if (reason != null) {
+      payload['reason'] = reason;
+    }
+    client.sendResponse(requestId, payload);
   }
 
   /// Requests replay of historical session events.

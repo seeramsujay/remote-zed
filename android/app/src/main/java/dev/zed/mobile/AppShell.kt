@@ -88,7 +88,12 @@ internal fun ZedAppContent(
                         containerColor = ZedColors.Accent,
                         contentColor = Color.White,
                         shape = CircleShape,
-                        elevation = androidx.compose.material3.FloatingActionButtonDefaults.elevation(2.dp, 2.dp, 2.dp, 2.dp),
+                        elevation = androidx.compose.material3.FloatingActionButtonDefaults.elevation(
+                            2.dp,
+                            2.dp,
+                            2.dp,
+                            2.dp
+                        ),
                         modifier = Modifier
                             .heightIn(min = 52.dp)
                             .semantics { contentDescription = "New thread" },
@@ -329,7 +334,13 @@ private fun ChatSubtitle(state: MobileState) {
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         state.project?.let {
-            Text(it.name, style = MaterialTheme.typography.bodySmall, color = ZedColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                it.name,
+                style = MaterialTheme.typography.bodySmall,
+                color = ZedColors.Muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
         if (label != null) {
             StatusDot(color, size = 5.dp)
@@ -363,7 +374,7 @@ internal fun MobileNavigationDrawer(
             }
             DrawerItem(Symbols.Projects, "Projects", state.page == Page.PROJECTS) { onDestination(Page.PROJECTS) }
             DrawerItem(Symbols.Folder, "Files", state.page == Page.FILES) { onDestination(Page.FILES) }
-            DrawerItem(androidx.compose.material.icons.Icons.Default.Terminal, "Terminal", state.page == Page.TERMINAL) { onDestination(Page.TERMINAL) }
+            DrawerItem(Symbols.Terminal, "Terminal", state.page == Page.TERMINAL) { onDestination(Page.TERMINAL) }
             DrawerItem(Symbols.Settings, "Settings", state.page == Page.SETTINGS) { onDestination(Page.SETTINGS) }
             Hairline(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
             val recents = state.recents
@@ -385,11 +396,19 @@ internal fun MobileNavigationDrawer(
                             .background(if (state.selectedThread?.id == recent.thread.id) ZedColors.Subtle else Color.Transparent)
                             .clickable { onOpenRecent(recent) }
                             .padding(horizontal = 12.dp, vertical = 9.dp)
-                            .semantics { contentDescription = "Open thread ${recent.thread.title.ifBlank { "New thread" }} in ${recent.project.name}" },
+                            .semantics {
+                                contentDescription =
+                                    "Open thread ${recent.thread.title.ifBlank { "New thread" }} in ${recent.project.name}"
+                            },
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Icon(Symbols.ChatBubble, contentDescription = null, tint = ZedColors.Muted, modifier = Modifier.size(16.dp))
+                        Icon(
+                            Symbols.ChatBubble,
+                            contentDescription = null,
+                            tint = ZedColors.Muted,
+                            modifier = Modifier.size(16.dp)
+                        )
                         Text(
                             recent.thread.title.ifBlank { "New thread" },
                             modifier = Modifier.weight(1f),
