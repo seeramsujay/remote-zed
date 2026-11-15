@@ -71,17 +71,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
-    private var notificationPermissionRequested = false
-    private val notificationPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission(),
+    private var permissionsRequested = false
+    private val permissionsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
     ) {
-        // A denied permission leaves the foreground connection active but suppresses event notifications.
+        // Permissions handled on startup
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
+        requestStartupPermissions()
         setContent {
             val vm: ZedViewModel = viewModel()
             val scanner = remember { AndroidQrCodeScanner(this@MainActivity) }
@@ -128,6 +129,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun requestStartupPermissions() {
+        if (permissionsRequested) return
+        permissionsRequested = true
+        val permissionsToRequest = mutableListOf<String>()
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            permissionsToRequest.add(Manifest.permission.CAMERA)
+        }
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (permissionsToRequest.isNotEmpty()) {
+            permissionsLauncher.launch(permissionsToRequest.toTypedArray())
+        }
+    }
+
     /**
      * Debug builds only: emulators without Play services cannot run the QR scanner, so a test can
      * pass the same one-time `ZEDM2:` value with `adb shell am start --es`. It is validated exactly
@@ -143,11 +162,9 @@ class MainActivity : ComponentActivity() {
     private fun requestNotificationPermissionIfNeeded() {
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
-            !notificationPermissionRequested
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            notificationPermissionRequested = true
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            permissionsLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
         }
     }
 }

@@ -32,15 +32,15 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x android/gradlew
 
-      - name: Build Android Compose APK
+      - name: Build Android Compose Release APK
         run: |
           cd android
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon
 
       - name: Prepare Android Compose APK artifact
         run: |
           mkdir -p dist
-          APK_FILE=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          APK_FILE=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
           cp "$APK_FILE" dist/zed-remote.apk
 
       - name: Upload Android Compose APK
@@ -68,10 +68,13 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Generate Flutter Android platform & build APK
+      - name: Generate Flutter Android platform & configure release signing
         run: |
           cd app
           flutter create --org dev.zed.mobile --platforms=android .
+          cd ..
+          python3 tools/configure-flutter-android.py
+          cd app
           flutter pub get
           flutter build apk --release
 
@@ -100,10 +103,12 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Generate Flutter iOS platform & build iOS
+      - name: Generate Flutter iOS platform & configure permissions
         run: |
           cd app
           flutter create --org dev.zed.mobile --platforms=ios .
+          plutil -insert NSCameraUsageDescription -string "Scan QR code to pair with desktop Zed" ios/Runner/Info.plist || true
+          plutil -insert NSLocalNetworkUsageDescription -string "Connect to Zed Remote daemon on local network" ios/Runner/Info.plist || true
           flutter pub get
           flutter build ios --release --no-codesign
 

@@ -124,9 +124,9 @@ else
     if [ -f "$ROOT_DIR/android/gradlew" ]; then
         cd "$ROOT_DIR/android"
         chmod +x gradlew
-        GRADLE_TASK="assembleDebug"
-        if [[ "$TARGET" == "release" ]]; then
-            GRADLE_TASK="assembleRelease"
+        GRADLE_TASK="assembleRelease"
+        if [[ "$TARGET" == "debug" ]]; then
+            GRADLE_TASK="assembleDebug"
         fi
         log_info "Running: ./gradlew $GRADLE_TASK"
         if ./gradlew "$GRADLE_TASK"; then
@@ -149,5 +149,5 @@ echo -e "Helpful commands:"
 echo -e "  1. Inject daemon into official Zed: ${CYAN}./tools/inject-daemon.sh${NC}"
 echo -e "  2. Start bunker tunnel:             ${CYAN}./tools/bunker-tunnel.sh${NC}"
 echo -e "  3. Build Flutter instead:           ${CYAN}./build-all.sh flutter${NC}"
-echo -e "  4. Build Compose Debug APK:         ${CYAN}./build-all.sh compose${NC}"
+echo -e "  4. Build Compose Release APK:       ${CYAN}./build-all.sh compose${NC}"
 echo -e "${GREEN}${BOLD}========================================================================${NC}\n"
