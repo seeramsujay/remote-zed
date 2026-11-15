@@ -12,6 +12,10 @@
 
 <br/>
 
+```bash
+curl -fsSL https://raw.githubusercontent.com/seeramsujay/remote-zed/main/install.sh | bash
+```
+
 [Features](#-key-features) •
 [Quick Start](#-quick-start) •
 [Bunker Tunnel](#-bunker-tunnel--firewall-bypass) •
@@ -91,28 +95,26 @@ Zed Remote places a lightweight proxy daemon between Zed and your AI agent execu
 
 ## 🚀 Quick Start
 
-### Step 1: Install the Android App
-Download and install the latest **`zed-remote.apk`** from [**Releases**](https://github.com/seeramsujay/remote-zed/releases) directly on your Android phone.
+### ⚡ Complete One-Line Install (Laptop)
 
-### Step 2: Inject Daemon into Official Zed (Laptop)
-No compilation of Zed is required! Run this one-time setup script to register `zed-remote-daemon` as an ACP agent server in `~/.config/zed/settings.json`:
+Run this single command on your laptop to set up Zed Remote, configure Zed, and generate your desktop binaries:
 
 ```bash
-./tools/inject-daemon.sh
+curl -fsSL https://raw.githubusercontent.com/seeramsujay/remote-zed/main/install.sh | bash
 ```
 
-### Step 3: Launch the Bunker Tunnel & Scan QR Code
-Start the encrypted reverse tunnel on your laptop:
-
+Once installed, simply run:
 ```bash
-./tools/bunker-tunnel.sh
+zed-tunnel
 ```
 
-An ASCII QR code will appear in your terminal:
-1. Open the **Zed Remote** app on your phone.
-2. Tap the **Scan QR** button on the pairing screen.
-3. Point your camera at the terminal QR code.
-4. The app resolves the tunnel from the encrypted rendezvous channel, decrypts the endpoint with AES-256-GCM on-device, and connects immediately!
+---
+
+### Mobile App Setup (Phone)
+
+1. **Download APK**: Grab **`zed-remote.apk`** from [**Releases**](https://github.com/seeramsujay/remote-zed/releases) and tap install on your Android phone.
+2. **Scan QR Code**: Open the app, tap the **Scan QR** icon, and scan the terminal QR code printed by `zed-tunnel`.
+3. **Control From Anywhere**: Prompt your agent, approve tool actions, run terminal commands, and open project folders off-the-grid!
 
 ---
 
@@ -192,6 +194,7 @@ remote-zed/
 │   ├── bunker-tunnel.sh# Fortinet-proof SSH 443 + AES-256-GCM tunnel & QR generator
 │   ├── inject-daemon.sh# Automatic official Zed settings.json injector
 │   └── install-extension.sh # Symlinks dev extension into Zed
+├── install.sh          # One-line automated host installer
 ├── patches/            # Reference GPUI gateway patches for Zed desktop
 ├── build-all.sh        # Local one-shot compilation script
 └── .github/workflows/  # Automated CI and release build pipelines
