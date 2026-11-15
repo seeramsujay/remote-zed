@@ -705,15 +705,6 @@ impl WebSocketGateway {
                 (200, serde_json::json!({
                     "files": []
                 }))
-            } else if path.contains("/threads/") && method == "GET" {
-                let state = thread_state.lock().await;
-                (200, serde_json::json!({
-                    "id": "main-thread",
-                    "title": "AntiGravity AI Workspace",
-                    "status": "ready",
-                    "messages": state.messages,
-                    "transcript": state.transcript
-                }))
             } else if path.contains("/threads/") && path.ends_with("/messages") && method == "POST" {
                 let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
                 let text = body_json.get("text").and_then(|v| v.as_str()).unwrap_or("");
@@ -789,6 +780,18 @@ impl WebSocketGateway {
             } else if path.contains("/threads/") && path.contains("/elicitations/") && path.ends_with("/respond") && method == "POST" {
                 (200, serde_json::json!({
                     "accepted": true
+                }))
+            } else if (path.starts_with("/v2/threads/") || path.starts_with("/threads/")) && method == "GET" {
+                let state = thread_state.lock().await;
+                let approvals = router.get_pending_approvals().await;
+                (200, serde_json::json!({
+                    "id": "main-thread",
+                    "title": "AntiGravity AI Workspace",
+                    "status": "ready",
+                    "messages": state.messages,
+                    "transcript": state.transcript,
+                    "approvals": approvals,
+                    "elicitations": []
                 }))
             } else {
                 match (method, path) {

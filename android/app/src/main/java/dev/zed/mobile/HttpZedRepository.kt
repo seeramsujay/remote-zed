@@ -251,7 +251,7 @@ class HttpZedRepository private constructor(
     override suspend fun approvals(id: String): List<ToolApproval> = request(
         "GET",
         listOf("threads", id, "approvals"),
-    ).objects("approvals").map { approval ->
+    ).optionalObjects("approvals").map { approval ->
         ToolApproval(
             toolCallId = approval.string("tool_call_id"),
             title = approval.string("title"),
@@ -289,7 +289,7 @@ class HttpZedRepository private constructor(
 
     override suspend fun elicitations(id: String): List<Elicitation> {
         requireV2("Agent questions")
-        return request("GET", listOf("threads", id, "elicitations")).objects("elicitations").map { it.elicitation() }
+        return request("GET", listOf("threads", id, "elicitations")).optionalObjects("elicitations").map { it.elicitation() }
     }
 
     override suspend fun answerElicitation(
