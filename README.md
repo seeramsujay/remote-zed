@@ -126,9 +126,12 @@ Starts the tunnel and dynamically publishes encrypted updates to your phone in t
 ```bash
 zed-tunnel --service enable   # Start automatically on system boot via systemd user service
 zed-tunnel --service disable  # Revert to on-demand mode
+zed-tunnel --inject           # Re-inject daemon into Zed settings.json
 zed-tunnel --status           # Check tunnel and systemd service status
 zed-tunnel -h                 # Display help and commands
 zed-tunnel --update           # Update Zed Remote to latest release
+
+# Note: You can use "zedt" as a shorthand for "zed-tunnel" anywhere!
 ```
 
 ---

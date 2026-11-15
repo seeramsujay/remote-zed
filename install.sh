@@ -29,7 +29,7 @@ echo -e "${BOLD}Zed Remote: One-Line Complete Host Installer${NC}"
 echo -e "======================================================================\n"
 
 # 1. Dependency checks
-echo -e "${BLUE}${BOLD}[*] Step 1/5: Checking system dependencies...${NC}"
+echo -e "${BLUE}${BOLD}[*] Step 1/6: Checking system dependencies...${NC}"
 MISSING_PKGS=()
 for cmd in curl ssh python3 openssl; do
     if ! command -v "$cmd" &>/dev/null; then
@@ -51,7 +51,7 @@ echo -e "${GREEN}[✓] Dependencies verified.${NC}\n"
 
 # 2. Setup installation directory
 INSTALL_ROOT="${HOME}/.local/share/zed-remote"
-echo -e "${BLUE}${BOLD}[*] Step 2/5: Installing Zed Remote scripts and configs to ${INSTALL_ROOT}...${NC}"
+echo -e "${BLUE}${BOLD}[*] Step 2/6: Installing Zed Remote scripts and configs to ${INSTALL_ROOT}...${NC}"
 
 if command -v git &>/dev/null; then
     if [ -d "${INSTALL_ROOT}/.git" ]; then
@@ -71,22 +71,43 @@ chmod +x "${INSTALL_ROOT}/tools/"*.sh
 echo -e "${GREEN}[✓] Files installed successfully.${NC}\n"
 
 # 3. Inject into Zed settings.json
-echo -e "${BLUE}${BOLD}[*] Step 3/5: Injecting daemon into official Zed settings...${NC}"
+echo -e "${BLUE}${BOLD}[*] Step 3/6: Injecting daemon into official Zed settings...${NC}"
 "${INSTALL_ROOT}/tools/inject-daemon.sh"
 echo -e "${GREEN}[✓] Official Zed integration complete.${NC}\n"
 
 # 4. Link Dev Extension
-echo -e "${BLUE}${BOLD}[*] Step 4/5: Linking Zed Dev Extension...${NC}"
+echo -e "${BLUE}${BOLD}[*] Step 4/6: Linking Zed Dev Extension...${NC}"
 "${INSTALL_ROOT}/tools/install-extension.sh"
 echo -e "${GREEN}[✓] Dev Extension linked into Zed.${NC}\n"
 
 # Install symlinks into ~/.local/bin
 mkdir -p "${HOME}/.local/bin"
 ln -sf "${INSTALL_ROOT}/tools/bunker-tunnel.sh" "${HOME}/.local/bin/zed-tunnel"
+ln -sf "${INSTALL_ROOT}/tools/bunker-tunnel.sh" "${HOME}/.local/bin/zedt"
 ln -sf "${INSTALL_ROOT}/tools/inject-daemon.sh" "${HOME}/.local/bin/zed-inject"
 
-# 5. Systemd Service Option
-echo -e "${BLUE}${BOLD}[*] Step 5/5: Configuring Startup & Systemd Service...${NC}"
+# 5. Shell Alias Option (zedt)
+echo -e "${BLUE}${BOLD}[*] Step 5/6: Configuring Shell Shorthand (zedt)...${NC}"
+PROMPT_ALIAS="y"
+if [ -t 0 ]; then
+    read -r -p "Would you like to configure shell alias 'zedt' for faster access? [Y/n]: " PROMPT_ALIAS || PROMPT_ALIAS="y"
+elif [ -e /dev/tty ]; then
+    read -r -p "Would you like to configure shell alias 'zedt' for faster access? [Y/n]: " PROMPT_ALIAS < /dev/tty || PROMPT_ALIAS="y"
+fi
+
+if [[ ! "${PROMPT_ALIAS,,}" =~ ^(n|no)$ ]]; then
+    for rc in "${HOME}/.bashrc" "${HOME}/.zshrc"; do
+        if [[ -f "$rc" ]] && ! grep -q 'alias zedt=' "$rc"; then
+            echo 'alias zedt="zed-tunnel"' >> "$rc"
+        fi
+    done
+    echo -e "${GREEN}[✓] Alias 'zedt' -> 'zed-tunnel' configured.${NC}\n"
+else
+    echo -e "${CYAN}[*] Skipped shell rc alias. Binary symlink ~/.local/bin/zedt is ready.${NC}\n"
+fi
+
+# 6. Systemd Service Option
+echo -e "${BLUE}${BOLD}[*] Step 6/6: Configuring Startup & Systemd Service...${NC}"
 PROMPT_ANSWER="n"
 if [ -t 0 ]; then
     # Interactive terminal
@@ -105,7 +126,7 @@ if [[ "${PROMPT_ANSWER,,}" =~ ^(y|yes)$ ]]; then
     fi
 else
     echo -e "${CYAN}[*] Configured for on-demand mode.${NC}"
-    echo -e "    You can run '${CYAN}zed-tunnel${NC}' whenever you want to connect,"
+    echo -e "    You can run '${CYAN}zed-tunnel${NC}' (or '${CYAN}zedt${NC}') whenever you want to connect,"
     echo -e "    or enable background autostart later with '${CYAN}zed-tunnel --service enable${NC}'."
 fi
 
@@ -134,16 +155,17 @@ echo -e "   • Flutter Cross-Platform APK: ${CYAN}zed-remote-flutter.apk${NC}"
 echo -e "   • Download latest from: ${CYAN}https://github.com/seeramsujay/remote-zed/releases${NC}"
 echo ""
 echo -e "🏰 ${BOLD}Step 2: Bind Your Phone Once${NC}"
-echo -e "   Run: ${CYAN}zed-tunnel --bind${NC}"
+echo -e "   Run: ${CYAN}zed-tunnel --bind${NC}  (or: ${CYAN}zedt --bind${NC})"
 echo -e "   Scan the QR code once with your phone. The binding is saved permanently!"
 echo ""
 echo -e "🚀 ${BOLD}Step 3: Everyday Use${NC}"
-echo -e "   Simply run: ${CYAN}zed-tunnel${NC}"
+echo -e "   Simply run: ${CYAN}zed-tunnel${NC}  (or: ${CYAN}zedt${NC})"
 echo -e "   (No QR scan needed! Your phone reconnects automatically)."
 echo ""
 echo -e "ℹ️  ${BOLD}Help & Systemd Service Management${NC}"
-echo -e "   • View all commands:    ${CYAN}zed-tunnel -h${NC}"
-echo -e "   • Enable autostart:     ${CYAN}zed-tunnel --service enable${NC}"
-echo -e "   • Disable autostart:    ${CYAN}zed-tunnel --service disable${NC}"
-echo -e "   • Update Zed Remote:    ${CYAN}zed-tunnel --update${NC}"
+echo -e "   • View all commands:    ${CYAN}zedt -h${NC}"
+echo -e "   • Re-inject into Zed:   ${CYAN}zedt --inject${NC}"
+echo -e "   • Enable autostart:     ${CYAN}zedt --service enable${NC}"
+echo -e "   • Disable autostart:    ${CYAN}zedt --service disable${NC}"
+echo -e "   • Update Zed Remote:    ${CYAN}zedt --update${NC}"
 echo -e "${GREEN}${BOLD}======================================================================${NC}\n"

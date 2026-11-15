@@ -46,10 +46,13 @@ show_help() {
     echo -e "  ${GREEN}-s, --status${NC}      Show tunnel connection and systemd service status"
     echo -e "  ${GREEN}--stop${NC}            Stop running background tunnel process"
     echo -e "  ${GREEN}--service <CMD>${NC}   Manage systemd user service: status | start | stop | restart | enable | disable"
+    echo -e "  ${GREEN}-i, --inject${NC}      Inject daemon into official Zed settings.json"
     echo -e "  ${GREEN}-u, --update${NC}      Update Zed Remote and all host tools to the latest version"
     echo -e "  ${GREEN}-h, --help${NC}        Show this help message\n"
     echo -e "${BOLD}ARGUMENTS:${NC}"
     echo -e "  PORT               Local Zed daemon gateway port (default: 8443)\n"
+    echo -e "${BOLD}SHORTHAND ALIAS:${NC}"
+    echo -e "  You can use ${CYAN}zedt${NC} as a direct shorthand for ${CYAN}zed-tunnel${NC}.\n"
     echo -e "${BOLD}PERSISTENT BINDING WORKFLOW:${NC}"
     echo -e "  1. First time setup:"
     echo -e "       ${CYAN}zed-tunnel --bind${NC}"
@@ -207,6 +210,28 @@ while [[ $# -gt 0 ]]; do
         --service)
             manage_service "${2:-status}"
             shift 2 || shift
+            ;;
+        -i|--inject)
+            INJECT_SCRIPT=""
+            CANDIDATES=(
+                "$(dirname "$0")/inject-daemon.sh"
+                "${HOME}/.local/share/zed-remote/tools/inject-daemon.sh"
+                "${HOME}/.local/bin/zed-inject"
+            )
+            for cand in "${CANDIDATES[@]}"; do
+                if [[ -f "$cand" ]]; then
+                    INJECT_SCRIPT="$cand"
+                    break
+                fi
+            done
+            if [[ -n "$INJECT_SCRIPT" ]]; then
+                echo -e "${BLUE}[*] Injecting Zed Remote daemon into Zed settings...${NC}"
+                bash "$INJECT_SCRIPT"
+            else
+                echo -e "${RED}[!] inject-daemon.sh not found.${NC}"
+                exit 1
+            fi
+            exit 0
             ;;
         -u|--update)
             run_update
