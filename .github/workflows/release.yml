@@ -1,0 +1,178 @@
+name: Release Build & Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release Tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    name: Build Native Android APK (Material 3)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x android/gradlew
+
+      - name: Build Android APK
+        run: |
+          cd android
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Prepare Android APK artifact
+        run: |
+          mkdir -p dist
+          APK_FILE=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          cp "$APK_FILE" dist/zed-remote-android.apk
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: zed-remote-android-apk
+          path: dist/zed-remote-android.apk
+
+  build-flutter:
+    name: Build Flutter Mobile APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.x'
+          channel: 'stable'
+          cache: true
+
+      - name: Build Flutter APK
+        run: |
+          cd app
+          flutter pub get
+          flutter build apk --release
+
+      - name: Prepare Flutter APK artifact
+        run: |
+          mkdir -p dist
+          cp app/build/app/outputs/flutter-apk/app-release.apk dist/zed-remote-flutter.apk
+
+      - name: Upload Flutter APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: zed-remote-flutter-apk
+          path: dist/zed-remote-flutter.apk
+
+  build-daemon:
+    name: Build Host Daemon (Linux x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: daemon
+
+      - name: Build daemon release binary
+        run: |
+          cd daemon
+          cargo build --release --locked
+
+      - name: Package daemon binary
+        run: |
+          mkdir -p dist
+          cp daemon/target/release/zed-remote-daemon dist/
+          cd dist
+          tar -czvf zed-remote-daemon-linux-x86_64.tar.gz zed-remote-daemon
+          rm zed-remote-daemon
+
+      - name: Upload daemon artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zed-remote-daemon-linux
+          path: dist/zed-remote-daemon-linux-x86_64.tar.gz
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-android, build-flutter, build-daemon]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Android Compose APK
+        uses: actions/download-artifact@v4
+        with:
+          name: zed-remote-android-apk
+          path: release-artifacts
+
+      - name: Download Flutter APK
+        uses: actions/download-artifact@v4
+        with:
+          name: zed-remote-flutter-apk
+          path: release-artifacts
+
+      - name: Download Linux Daemon
+        uses: actions/download-artifact@v4
+        with:
+          name: zed-remote-daemon-linux
+          path: release-artifacts
+
+      - name: Copy Tunnel & Injector Scripts
+        run: |
+          cp tools/bunker-tunnel.sh release-artifacts/
+          cp tools/inject-daemon.sh release-artifacts/
+
+      - name: Determine Release Tag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.release_tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: "Zed Remote ${{ steps.vars.outputs.tag }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            release-artifacts/zed-remote-android.apk
+            release-artifacts/zed-remote-flutter.apk
+            release-artifacts/zed-remote-daemon-linux-x86_64.tar.gz
+            release-artifacts/bunker-tunnel.sh
+            release-artifacts/inject-daemon.sh
