@@ -42,12 +42,51 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
+fn default_agent_id() -> String {
+    "antigravity".to_string()
+}
+
+fn default_mode() -> String {
+    "yolo".to_string()
+}
+
+fn is_binary_available(name: &str) -> bool {
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path) {
+            if dir.join(name).is_file() {
+                return true;
+            }
+        }
+    }
+    let standard_dirs = [
+        dirs::home_dir().map(|h| h.join(".local/bin")),
+        dirs::home_dir().map(|h| h.join(".cargo/bin")),
+        dirs::home_dir().map(|h| h.join(".npm-global/bin")),
+        Some(std::path::PathBuf::from("/usr/local/bin")),
+        Some(std::path::PathBuf::from("/usr/bin")),
+    ];
+    for dir in standard_dirs.into_iter().flatten() {
+        if dir.join(name).is_file() {
+            return true;
+        }
+    }
+    false
+}
+
 /// A custom user thread representation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CustomThread {
     pub id: String,
     pub title: String,
     pub status: String,
+    #[serde(default = "default_agent_id")]
+    pub agent_id: String,
+    #[serde(default = "default_mode")]
+    pub mode: String,
+    #[serde(default)]
+    pub messages: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub transcript: Vec<serde_json::Value>,
 }
 
 /// State of an active thread for v2 mobile clients.
@@ -657,54 +696,106 @@ impl WebSocketGateway {
                 let mut threads_list = vec![serde_json::json!({
                     "id": "main-thread",
                     "title": "AntiGravity AI Workspace",
-                    "status": "ready"
+                    "status": "ready",
+                    "agent": {
+                        "id": "antigravity",
+                        "name": "AntiGravity Agent",
+                        "is_native": false
+                    }
                 })];
                 for ct in &state.custom_threads {
+                    let agent_name = if ct.agent_id == "pi" { "Pi Agent" } else { "AntiGravity Agent" };
                     threads_list.push(serde_json::json!({
                         "id": ct.id,
                         "title": ct.title,
-                        "status": ct.status
+                        "status": ct.status,
+                        "agent": {
+                            "id": ct.agent_id,
+                            "name": agent_name,
+                            "is_native": false
+                        }
                     }));
                 }
                 (200, serde_json::json!({ "threads": threads_list }))
             } else if (path == "/v2/threads" || path.ends_with("/threads")) && method == "POST" {
+                let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                let agent_id = body_json.get("agent_id").and_then(|v| v.as_str()).unwrap_or("antigravity").to_string();
+                let (agent_name, title) = if agent_id == "pi" {
+                    ("Pi Agent", "Pi Conversation")
+                } else {
+                    ("AntiGravity Agent", "New Conversation")
+                };
                 let thread_id = format!("thread-{}", chrono::Utc::now().timestamp_millis());
-                let title = "New Conversation".to_string();
-                let mut state = thread_state.lock().await;
-                state.custom_threads.push(CustomThread {
+                let new_thread = CustomThread {
                     id: thread_id.clone(),
-                    title: title.clone(),
+                    title: title.to_string(),
                     status: "ready".to_string(),
-                });
+                    agent_id: agent_id.clone(),
+                    mode: "yolo".to_string(),
+                    messages: Vec::new(),
+                    transcript: Vec::new(),
+                };
+                let mut state = thread_state.lock().await;
+                state.custom_threads.push(new_thread);
+                drop(state);
+
                 (200, serde_json::json!({
                     "id": thread_id,
                     "title": title,
-                    "status": "ready"
+                    "status": "ready",
+                    "agent": {
+                        "id": agent_id,
+                        "name": agent_name,
+                        "is_native": false
+                    }
                 }))
             } else if path.ends_with("/agents") && method == "GET" {
                 (200, serde_json::json!({
-                    "agents": [{
-                        "id": "antigravity",
-                        "name": "AntiGravity Agent",
-                        "is_native": false
-                    }]
+                    "agents": [
+                        {
+                            "id": "antigravity",
+                            "name": "AntiGravity Agent",
+                            "is_native": false
+                        },
+                        {
+                            "id": "pi",
+                            "name": "Pi Agent",
+                            "is_native": false
+                        }
+                    ]
                 }))
             } else if path.contains("/threads/") && path.ends_with("/configuration") {
+                let parts: Vec<&str> = path.split('/').collect();
+                let req_thread_id = parts.iter().position(|&p| p == "threads")
+                    .and_then(|idx| parts.get(idx + 1))
+                    .copied()
+                    .unwrap_or("main-thread");
+
                 if method == "PUT" {
                     let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
                     let mut state = thread_state.lock().await;
-                    if let Some(mode_id) = body_json.get("mode_id").and_then(|v| v.as_str()) {
-                        state.current_mode = mode_id.to_string();
-                        router.set_mode(mode_id).await;
+                    let mode_id = body_json.get("mode_id").and_then(|v| v.as_str()).unwrap_or("yolo").to_string();
+                    if req_thread_id == "main-thread" {
+                        state.current_mode = mode_id.clone();
+                        router.set_mode(&mode_id).await;
+                    } else if let Some(ct) = state.custom_threads.iter_mut().find(|t| t.id == req_thread_id) {
+                        ct.mode = mode_id.clone();
                     }
-                    let mode = state.current_mode.clone();
+                    let (agent_id, agent_name, mode) = if req_thread_id == "main-thread" {
+                        ("antigravity", "AntiGravity Agent", state.current_mode.clone())
+                    } else if let Some(ct) = state.custom_threads.iter().find(|t| t.id == req_thread_id) {
+                        let name = if ct.agent_id == "pi" { "Pi Agent" } else { "AntiGravity Agent" };
+                        (ct.agent_id.as_str(), name, ct.mode.clone())
+                    } else {
+                        ("antigravity", "AntiGravity Agent", "yolo".to_string())
+                    };
                     drop(state);
                     (200, serde_json::json!({
                         "model": null,
                         "thinking_enabled": false,
                         "agent": {
-                            "id": "antigravity",
-                            "name": "AntiGravity Agent",
+                            "id": agent_id,
+                            "name": agent_name,
                             "is_native": false
                         },
                         "modes": {
@@ -731,14 +822,21 @@ impl WebSocketGateway {
                     }))
                 } else {
                     let state = thread_state.lock().await;
-                    let mode = state.current_mode.clone();
+                    let (agent_id, agent_name, mode) = if req_thread_id == "main-thread" {
+                        ("antigravity", "AntiGravity Agent", state.current_mode.clone())
+                    } else if let Some(ct) = state.custom_threads.iter().find(|t| t.id == req_thread_id) {
+                        let name = if ct.agent_id == "pi" { "Pi Agent" } else { "AntiGravity Agent" };
+                        (ct.agent_id.as_str(), name, ct.mode.clone())
+                    } else {
+                        ("antigravity", "AntiGravity Agent", state.current_mode.clone())
+                    };
                     drop(state);
                     (200, serde_json::json!({
                         "model": null,
                         "thinking_enabled": false,
                         "agent": {
-                            "id": "antigravity",
-                            "name": "AntiGravity Agent",
+                            "id": agent_id,
+                            "name": agent_name,
                             "is_native": false
                         },
                         "modes": {
@@ -769,34 +867,85 @@ impl WebSocketGateway {
                     "files": []
                 }))
             } else if path.contains("/threads/") && path.ends_with("/messages") && method == "POST" {
+                let parts: Vec<&str> = path.split('/').collect();
+                let req_thread_id = parts.iter().position(|&p| p == "threads")
+                    .and_then(|idx| parts.get(idx + 1))
+                    .copied()
+                    .unwrap_or("main-thread");
+
                 let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
                 let text = body_json.get("text").and_then(|v| v.as_str()).unwrap_or("");
                 if !text.is_empty() {
-                    let mut state = thread_state.lock().await;
-                    state.messages.push(serde_json::json!({
-                        "role": "user",
-                        "text": text
-                    }));
-                    state.transcript.push(serde_json::json!({
-                        "kind": "user_message",
-                        "body": text,
-                        "timestamp": chrono::Utc::now().to_rfc3339()
-                    }));
-                    drop(state);
-
-                    let prompt_rpc = serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "session/prompt",
-                        "params": {
-                            "sessionId": "default",
-                            "prompt": [{
-                                "type": "text",
-                                "text": text
-                            }]
+                    let agent_id = {
+                        let mut state = thread_state.lock().await;
+                        let user_msg = serde_json::json!({ "role": "user", "text": text });
+                        let user_transcript = serde_json::json!({
+                            "kind": "user_message",
+                            "body": text,
+                            "timestamp": chrono::Utc::now().to_rfc3339()
+                        });
+                        if req_thread_id == "main-thread" {
+                            state.messages.push(user_msg);
+                            state.transcript.push(user_transcript);
+                            "antigravity".to_string()
+                        } else if let Some(ct) = state.custom_threads.iter_mut().find(|t| t.id == req_thread_id) {
+                            ct.messages.push(user_msg);
+                            ct.transcript.push(user_transcript);
+                            ct.agent_id.clone()
+                        } else {
+                            "antigravity".to_string()
                         }
-                    }).to_string();
-                    let _ = router.handle_mobile_message(&prompt_rpc).await;
+                    };
+
+                    if agent_id == "pi" && !is_binary_available("pi-acp") && !is_binary_available("pi") {
+                        let reply_text = "Pi Agent is configured in YOLO mode, but the 'pi' or 'pi-acp' executable is not yet installed on this host.\n\nTo install it on desktop, run:\n```bash\nnpm install -g @earendil-works/pi-coding-agent\nnpm install -g @victor-software-house/pi-acp\n```\nOnce installed, Pi will automatically connect with full YOLO autonomy.";
+
+                        let mut state = thread_state.lock().await;
+                        let asst_msg = serde_json::json!({ "role": "assistant", "text": reply_text });
+                        let asst_transcript = serde_json::json!({
+                            "kind": "assistant_message",
+                            "body": reply_text,
+                            "timestamp": chrono::Utc::now().to_rfc3339()
+                        });
+                        if req_thread_id == "main-thread" {
+                            state.messages.push(asst_msg);
+                            state.transcript.push(asst_transcript);
+                        } else if let Some(ct) = state.custom_threads.iter_mut().find(|t| t.id == req_thread_id) {
+                            ct.messages.push(asst_msg);
+                            ct.transcript.push(asst_transcript);
+                        }
+                        drop(state);
+
+                        let notif = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "method": "session/update",
+                            "params": {
+                                "sessionId": req_thread_id,
+                                "update": {
+                                    "sessionUpdateType": "agent_message",
+                                    "content": [{
+                                        "type": "text",
+                                        "text": reply_text
+                                    }]
+                                }
+                            }
+                        }).to_string();
+                        let _ = router.mobile_broadcast_tx.send(notif);
+                    } else {
+                        let prompt_rpc = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "session/prompt",
+                            "params": {
+                                "sessionId": req_thread_id,
+                                "prompt": [{
+                                    "type": "text",
+                                    "text": text
+                                }]
+                            }
+                        }).to_string();
+                        let _ = router.handle_mobile_message(&prompt_rpc).await;
+                    }
                 }
                 (200, serde_json::json!({
                     "accepted": true
@@ -857,22 +1006,42 @@ impl WebSocketGateway {
                         "id": "main-thread",
                         "title": "AntiGravity AI Workspace",
                         "status": "ready",
+                        "agent": {
+                            "id": "antigravity",
+                            "name": "AntiGravity Agent",
+                            "is_native": false
+                        },
                         "messages": messages,
                         "transcript": state.transcript,
                         "approvals": approvals,
                         "elicitations": []
                     }))
+                } else if let Some(ct) = state.custom_threads.iter().find(|t| t.id == thread_id) {
+                    let agent_name = if ct.agent_id == "pi" { "Pi Agent" } else { "AntiGravity Agent" };
+                    (200, serde_json::json!({
+                        "id": ct.id,
+                        "title": ct.title,
+                        "status": ct.status,
+                        "agent": {
+                            "id": ct.agent_id,
+                            "name": agent_name,
+                            "is_native": false
+                        },
+                        "messages": ct.messages,
+                        "transcript": ct.transcript,
+                        "approvals": approvals,
+                        "elicitations": []
+                    }))
                 } else {
-                    let title = state
-                        .custom_threads
-                        .iter()
-                        .find(|t| t.id == thread_id)
-                        .map(|t| t.title.as_str())
-                        .unwrap_or("New Conversation");
                     (200, serde_json::json!({
                         "id": thread_id,
-                        "title": title,
+                        "title": "New Conversation",
                         "status": "ready",
+                        "agent": {
+                            "id": "antigravity",
+                            "name": "AntiGravity Agent",
+                            "is_native": false
+                        },
                         "messages": [],
                         "transcript": [],
                         "approvals": approvals,

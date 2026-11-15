@@ -340,7 +340,7 @@ fi
 cleanup() {
     echo ""
     echo -e "${YELLOW}[*] Shutting down pinggy tunnel...${NC}"
-    pkill -f "free.pinggy.io" || true
+    pkill -f "pinggy.io" || true
     exit 0
 }
 trap cleanup SIGINT SIGTERM
@@ -379,10 +379,12 @@ except Exception as e:
 # Main tunnel loop (Pinggy sessions refresh automatically every 55 minutes on free tier)
 while true; do
     echo -e "${BLUE}[*] Initializing fresh reverse tunnel via SSH (port 443)...${NC}"
-    pkill -f "free.pinggy.io" || true
+    pkill -f "pinggy.io" || true
     > "${LOG_FILE}"
 
-    stdbuf -oL ssh -p 443 -R0:localhost:"${LOCAL_PORT}" tcp@free.pinggy.io \
+    # Try a.pinggy.io first (more reliable thread capacity), fallback to free.pinggy.io
+    PINGGY_HOST="a.pinggy.io"
+    stdbuf -oL ssh -p 443 -R0:localhost:"${LOCAL_PORT}" -T tcp@"${PINGGY_HOST}" \
         -o StrictHostKeyChecking=no \
         -o ServerAliveInterval=30 \
         -o ServerAliveCountMax=3 > "${LOG_FILE}" 2>&1 &
@@ -402,6 +404,28 @@ while true; do
         head -n 10 "${LOG_FILE}"
     fi
 
-    echo -e "${BLUE}[*] Tunnel active. Automatic refresh in 55 minutes...${NC}"
-    sleep 3300
+    COUNT=0
+    while kill -0 "${SSH_PID}" 2>/dev/null; do
+        if [[ -z "${TUNNEL_URL}" ]]; then
+            TUNNEL_URL=$(grep -oE "(tcp|http|https)://[a-zA-Z0-9.-]+:[0-9]+" "${LOG_FILE}" | head -n 1 || true)
+            if [[ -n "${TUNNEL_URL}" ]]; then
+                echo -e "${GREEN}${BOLD}[+] Tunnel is LIVE: ${TUNNEL_URL}${NC}"
+                encrypt_and_publish "${TUNNEL_URL}"
+            fi
+        fi
+        sleep 5
+        COUNT=$((COUNT + 5))
+        # Re-publish keepalive to ntfy every 30 seconds so dynamic rendezvous never expires
+        if [[ $((COUNT % 30)) -eq 0 ]] && [[ -n "${TUNNEL_URL}" ]]; then
+            encrypt_and_publish "${TUNNEL_URL}" >/dev/null 2>&1 || true
+        fi
+        # Enforce refresh at 55 minutes for Pinggy free tier rotation
+        if [[ ${COUNT} -ge 3300 ]]; then
+            echo -e "${BLUE}[*] 55-minute rotation window reached, rotating tunnel...${NC}"
+            break
+        fi
+    done
+
+    echo -e "${YELLOW}[!] Tunnel connection dropped or rotating. Restarting immediately...${NC}"
+    kill "${SSH_PID}" 2>/dev/null || true
 done

@@ -1,37 +1,33 @@
 package dev.zed.mobile
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Commit
-import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -40,7 +36,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -69,20 +64,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * Material 3 Git Control Panel Drawer.
+ * Material 3 Source Control Screen.
  *
- * Modeled after Zed Desktop's right-hand Git panel, providing:
+ * Full-screen source control screen modeled after Zed Desktop's Git panel:
  * - Branch inspection & switching
  * - Staged vs Unstaged file management with selective staging
  * - Commit compose with "Commit" and "Stage All & Commit"
  * - Push to remote repository
  * - Interactive Git commit graph & history log
+ * - Perfectly adapts to system theme: Dark Mode for dark, Light Mode for light.
+ * - Perfectly harmonized typography: Inter for labels/buttons, JetBrains Mono for code/hashes/paths.
  */
 @Composable
-fun GitPanelDrawer(
+fun GitScreen(
     state: MobileState,
     vm: ZedViewModel,
-    onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -102,11 +98,21 @@ fun GitPanelDrawer(
     if (showBranchesDialog) {
         AlertDialog(
             onDismissRequest = { showBranchesDialog = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurface,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.AccountTree, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(
+                        imageVector = Icons.Default.AccountTree,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Git Branches", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = "Git Branches",
+                        style = MaterialTheme.typography.titleMedium.copy(fontFamily = InterFamily),
+                    )
                 }
             },
             text = {
@@ -117,7 +123,10 @@ fun GitPanelDrawer(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (isCurrent) ZedColors.Subtle else Color.Transparent)
+                                .background(
+                                    if (isCurrent) MaterialTheme.colorScheme.surfaceContainerHigh
+                                    else Color.Transparent
+                                )
                                 .clickable {
                                     showBranchesDialog = false
                                 }
@@ -130,7 +139,7 @@ fun GitPanelDrawer(
                                     fontFamily = MonoFamily,
                                     fontSize = 13.sp,
                                     fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isCurrent) MaterialTheme.colorScheme.primary else ZedColors.DarkText,
+                                    color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                 ),
                                 modifier = Modifier.weight(1f),
                             )
@@ -148,177 +157,226 @@ fun GitPanelDrawer(
             },
             confirmButton = {
                 TextButton(onClick = { showBranchesDialog = false }) {
-                    Text("Close")
+                    Text(
+                        "Close",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelLarge.copy(fontFamily = InterFamily),
+                    )
                 }
             },
         )
     }
 
-    ModalDrawerSheet(
+    Column(
         modifier = modifier
-            .width(320.dp)
-            .fillMaxHeight(),
-        drawerContainerColor = ZedColors.DarkSurface,
-        drawerContentColor = ZedColors.DarkText,
-        drawerShape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp),
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Header Bar: Branch selector, Refresh, Push, Close
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.fillMaxWidth(),
+        // Sub-header bar: Branch chip, Push button, Refresh indicator
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                // Branch Selector Chip
                 Row(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .clickable { showBranchesDialog = true }
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // Branch Selector Chip
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainer)
-                            .clickable { showBranchesDialog = true }
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AccountTree,
-                            contentDescription = "Branch",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(15.dp),
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = branch,
-                            style = TextStyle(
-                                fontFamily = MonoFamily,
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = ZedColors.DarkText,
-                            ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 130.dp),
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(
-                            imageVector = Icons.Default.KeyboardArrowDown,
-                            contentDescription = null,
-                            tint = ZedColors.DarkMuted,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.weight(1f))
-
-                    // Push button
-                    IconButton(
-                        onClick = { vm.pushGit() },
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowUpward,
-                            contentDescription = "Push to Remote",
-                            tint = Color(0xFF34D399),
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-
-                    // Refresh button
-                    IconButton(
-                        onClick = {
-                            vm.loadGitStatus()
-                            vm.loadGitLog()
-                        },
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Refresh",
-                            tint = ZedColors.DarkMuted,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-
-                    // Close button
-                    IconButton(
-                        onClick = onClose,
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close Git Panel",
-                            tint = ZedColors.DarkMuted,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
-            }
-
-            // Tab Switcher: Changes vs Graph & Log
-            TabRow(
-                selectedTabIndex = selectedTab,
-                containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                contentColor = ZedColors.DarkText,
-                indicator = { tabPositions ->
-                    TabRowDefaults.SecondaryIndicator(
-                        Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                        color = MaterialTheme.colorScheme.primary,
+                    Icon(
+                        imageVector = Icons.Default.AccountTree,
+                        contentDescription = "Branch",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp),
                     )
-                },
-            ) {
-                Tab(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    text = {
-                        val totalChanges = stagedFiles.size + unstagedFiles.size
-                        Text(
-                            text = if (totalChanges > 0) "Changes ($totalChanges)" else "Changes",
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    },
-                )
-                Tab(
-                    selected = selectedTab == 1,
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = branch,
+                        style = TextStyle(
+                            fontFamily = MonoFamily,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Switch Branch",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // Push Button
+                FilledTonalButton(
+                    onClick = { vm.pushGit() },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.primary,
+                    ),
+                    modifier = Modifier.height(34.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowUpward,
+                        contentDescription = "Push",
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        "Push",
+                        style = TextStyle(
+                            fontFamily = InterFamily,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // Refresh Button
+                IconButton(
                     onClick = {
-                        selectedTab = 1
+                        vm.loadGitStatus()
                         vm.loadGitLog()
                     },
-                    text = {
-                        Text("Graph & Log", style = MaterialTheme.typography.labelMedium)
-                    },
+                    modifier = Modifier.size(34.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Refresh",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+
+        // Navigation Tabs: Changes vs Log & Graph
+        TabRow(
+            selectedTabIndex = selectedTab,
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.primary,
+            indicator = { tabPositions ->
+                TabRowDefaults.SecondaryIndicator(
+                    modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            },
+            divider = {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+            },
+        ) {
+            Tab(
+                selected = selectedTab == 0,
+                onClick = { selectedTab = 0 },
+                text = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Changes",
+                            style = TextStyle(
+                                fontFamily = InterFamily,
+                                fontWeight = if (selectedTab == 0) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (selectedTab == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
+                        )
+                        val totalChanges = (status?.files?.size ?: 0)
+                        if (totalChanges > 0) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (selectedTab == 0) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.surfaceContainerHighest
+                                    )
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            ) {
+                                Text(
+                                    text = "$totalChanges",
+                                    style = TextStyle(
+                                        fontFamily = MonoFamily,
+                                        fontSize = 11.sp,
+                                        color = if (selectedTab == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                },
+            )
+            Tab(
+                selected = selectedTab == 1,
+                onClick = { selectedTab = 1 },
+                text = {
+                    Text(
+                        "Graph & Log",
+                        style = TextStyle(
+                            fontFamily = InterFamily,
+                            fontWeight = if (selectedTab == 1) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (selectedTab == 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                    )
+                },
+            )
+        }
+
+        if (state.gitLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
+        }
 
-            if (state.gitLoading && status == null) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                }
-            } else {
-                when (selectedTab) {
-                    0 -> GitChangesTab(
-                        stagedFiles = stagedFiles,
-                        unstagedFiles = unstagedFiles,
-                        commitMessage = commitMessage,
-                        onCommitMessageChange = { commitMessage = it },
-                        onStageFile = { file -> vm.stageGit(listOf(file.path)) },
-                        onUnstageFile = { file -> vm.unstageGit(listOf(file.path)) },
-                        onStageAll = { vm.stageGit(unstagedFiles.map { it.path }) },
-                        onUnstageAll = { vm.unstageGit(stagedFiles.map { it.path }) },
-                        onCommit = {
+        // Tab Content
+        Box(modifier = Modifier.weight(1f)) {
+            when (selectedTab) {
+                0 -> GitChangesTab(
+                    staged = stagedFiles,
+                    unstaged = unstagedFiles,
+                    commitMessage = commitMessage,
+                    onCommitMessageChange = { commitMessage = it },
+                    onStageFile = { path -> vm.stageGit(path) },
+                    onUnstageFile = { path -> vm.unstageGit(path) },
+                    onStageAll = { unstagedFiles.forEach { vm.stageGit(it.path) } },
+                    onUnstageAll = { stagedFiles.forEach { vm.unstageGit(it.path) } },
+                    onCommit = {
+                        if (commitMessage.isNotBlank()) {
                             vm.commitGit(commitMessage, stageAll = false)
                             commitMessage = ""
-                        },
-                        onStageAllAndCommit = {
+                        }
+                    },
+                    onStageAllAndCommit = {
+                        if (commitMessage.isNotBlank()) {
                             vm.commitGit(commitMessage, stageAll = true)
                             commitMessage = ""
-                        },
-                    )
-
-                    1 -> GitGraphTab(commits = state.gitCommits)
-                }
+                        }
+                    },
+                )
+                1 -> GitGraphTab(commits = state.gitCommits)
             }
         }
     }
@@ -326,12 +384,12 @@ fun GitPanelDrawer(
 
 @Composable
 private fun GitChangesTab(
-    stagedFiles: List<GitFileStatus>,
-    unstagedFiles: List<GitFileStatus>,
+    staged: List<GitFileStatus>,
+    unstaged: List<GitFileStatus>,
     commitMessage: String,
     onCommitMessageChange: (String) -> Unit,
-    onStageFile: (GitFileStatus) -> Unit,
-    onUnstageFile: (GitFileStatus) -> Unit,
+    onStageFile: (String) -> Unit,
+    onUnstageFile: (String) -> Unit,
     onStageAll: () -> Unit,
     onUnstageAll: () -> Unit,
     onCommit: () -> Unit,
@@ -344,134 +402,187 @@ private fun GitChangesTab(
                 .fillMaxWidth(),
         ) {
             // STAGED CHANGES SECTION
-            if (stagedFiles.isNotEmpty()) {
-                item(key = "staged_header") {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 14.dp, end = 10.dp, top = 12.dp, bottom = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "STAGED CHANGES (${stagedFiles.size})",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF34D399),
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainer)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "STAGED CHANGES",
+                        style = TextStyle(
+                            fontFamily = InterFamily,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f),
+                            letterSpacing = 0.8.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "(${staged.size})",
+                        style = TextStyle(
+                            fontFamily = MonoFamily,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    if (staged.isNotEmpty()) {
+                        Text(
+                            text = "Unstage All",
+                            style = TextStyle(
+                                fontFamily = InterFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.primary,
+                            ),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { onUnstageAll() }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
                         )
-                        TextButton(onClick = onUnstageAll) {
-                            Text("Unstage All", style = MaterialTheme.typography.labelSmall)
-                        }
                     }
                 }
+            }
 
-                items(stagedFiles, key = { "staged_${it.path}" }) { file ->
+            if (staged.isEmpty()) {
+                item {
+                    Text(
+                        text = "No staged changes",
+                        style = TextStyle(
+                            fontFamily = InterFamily,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                    )
+                }
+            } else {
+                items(staged, key = { "staged_${it.path}" }) { file ->
                     GitFileRow(
                         file = file,
-                        staged = true,
-                        onToggle = { onUnstageFile(file) },
+                        isChecked = true,
+                        onToggle = { onUnstageFile(file.path) },
                     )
                 }
             }
 
             // UNSTAGED CHANGES SECTION
-            if (unstagedFiles.isNotEmpty()) {
-                item(key = "unstaged_header") {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 14.dp, end = 10.dp, top = 12.dp, bottom = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "CHANGES (${unstagedFiles.size})",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ZedColors.DarkMuted,
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainer)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "CHANGES",
+                        style = TextStyle(
+                            fontFamily = InterFamily,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(onClick = onStageAll) {
-                            Text("Stage All", style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-
-                items(unstagedFiles, key = { "unstaged_${it.path}" }) { file ->
-                    GitFileRow(
-                        file = file,
-                        staged = false,
-                        onToggle = { onStageFile(file) },
+                            letterSpacing = 0.8.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
                     )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "(${unstaged.size})",
+                        style = TextStyle(
+                            fontFamily = MonoFamily,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    if (unstaged.isNotEmpty()) {
+                        Text(
+                            text = "Stage All",
+                            style = TextStyle(
+                                fontFamily = InterFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.primary,
+                            ),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { onStageAll() }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
                 }
             }
 
-            if (stagedFiles.isEmpty() && unstagedFiles.isEmpty()) {
-                item(key = "clean_state") {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(32.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Default.DoneAll,
-                                contentDescription = null,
-                                tint = Color(0xFF34D399),
-                                modifier = Modifier.size(36.dp),
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "Working tree clean",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = ZedColors.DarkText,
-                            )
-                            Text(
-                                text = "No uncommitted modifications",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = ZedColors.DarkMuted,
-                            )
-                        }
-                    }
+            if (unstaged.isEmpty()) {
+                item {
+                    Text(
+                        text = "Working tree clean",
+                        style = TextStyle(
+                            fontFamily = InterFamily,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                    )
+                }
+            } else {
+                items(unstaged, key = { "unstaged_${it.path}" }) { file ->
+                    GitFileRow(
+                        file = file,
+                        isChecked = false,
+                        onToggle = { onStageFile(file.path) },
+                    )
                 }
             }
         }
 
-        HorizontalDivider(color = ZedColors.DarkHairline)
-
-        // Commit Composer Box
+        // COMMIT COMPOSER BAR AT BOTTOM
         Surface(
-            color = MaterialTheme.colorScheme.surfaceContainer,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 4.dp,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Column(modifier = Modifier.padding(12.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+            ) {
                 OutlinedTextField(
                     value = commitMessage,
                     onValueChange = onCommitMessageChange,
                     placeholder = {
                         Text(
-                            "Commit message...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = ZedColors.DarkMuted,
+                            "Commit message…",
+                            style = TextStyle(
+                                fontFamily = InterFamily,
+                                fontSize = 13.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
                         )
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(86.dp),
                     textStyle = TextStyle(
                         fontFamily = InterFamily,
                         fontSize = 13.5.sp,
-                        color = ZedColors.DarkText,
+                        color = MaterialTheme.colorScheme.onSurface,
                     ),
+                    shape = RoundedCornerShape(10.dp),
                     colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = ZedColors.DarkHairline,
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        cursorColor = MaterialTheme.colorScheme.primary,
                     ),
-                    maxLines = 3,
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -479,27 +590,42 @@ private fun GitChangesTab(
                 ) {
                     Button(
                         onClick = onCommit,
-                        enabled = commitMessage.isNotBlank() && stagedFiles.isNotEmpty(),
-                        modifier = Modifier.weight(1f),
+                        enabled = commitMessage.isNotBlank() && staged.isNotEmpty(),
                         shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                        modifier = Modifier.weight(1f),
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Commit,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
+                        Text(
+                            "Commit",
+                            style = TextStyle(
+                                fontFamily = InterFamily,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                            ),
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Commit", style = MaterialTheme.typography.labelMedium)
                     }
 
-                    if (unstagedFiles.isNotEmpty() && stagedFiles.isEmpty()) {
-                        FilledTonalButton(
-                            onClick = onStageAllAndCommit,
-                            enabled = commitMessage.isNotBlank(),
-                            shape = RoundedCornerShape(8.dp),
-                        ) {
-                            Text("Stage All & Commit", style = MaterialTheme.typography.labelSmall)
-                        }
+                    OutlinedButton(
+                        onClick = onStageAllAndCommit,
+                        enabled = commitMessage.isNotBlank() && (staged.isNotEmpty() || unstaged.isNotEmpty()),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.primary,
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.weight(1.3f),
+                    ) {
+                        Text(
+                            "Stage All & Commit",
+                            style = TextStyle(
+                                fontFamily = InterFamily,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                            ),
+                        )
                     }
                 }
             }
@@ -510,89 +636,127 @@ private fun GitChangesTab(
 @Composable
 private fun GitFileRow(
     file: GitFileStatus,
-    staged: Boolean,
+    isChecked: Boolean,
     onToggle: () -> Unit,
 ) {
+    val dark = isSystemInDarkTheme()
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onToggle)
-            .padding(horizontal = 10.dp, vertical = 4.dp),
+            .clickable { onToggle() }
+            .padding(horizontal = 14.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Checkbox(
-            checked = staged,
+            checked = isChecked,
             onCheckedChange = { onToggle() },
             colors = CheckboxDefaults.colors(
-                checkedColor = Color(0xFF34D399),
-                uncheckedColor = ZedColors.DarkMuted,
+                checkedColor = MaterialTheme.colorScheme.primary,
+                uncheckedColor = MaterialTheme.colorScheme.outline,
             ),
             modifier = Modifier.size(24.dp),
         )
-        Spacer(modifier = Modifier.width(8.dp))
 
-        // Status badge (M, A, D, ?)
-        val badgeColor = when (file.status.lowercase()) {
-            "modified" -> Color(0xFFFBBF24) // Yellow
-            "new", "untracked" -> Color(0xFF34D399) // Green
-            "deleted" -> Color(0xFFF87171) // Red
-            else -> ZedColors.DarkMuted
-        }
-        val badgeLabel = when (file.status.lowercase()) {
-            "modified" -> "M"
-            "new", "untracked" -> "A"
-            "deleted" -> "D"
-            else -> "M"
+        Spacer(modifier = Modifier.width(10.dp))
+
+        // Git Status Indicator Badge
+        val (badgeChar, badgeColor, badgeBg) = when (file.status) {
+            "M" -> Triple(
+                "M",
+                ZedColors.Warning,
+                if (dark) ZedColors.WarningSoft else Color(0xFFFEF3C7)
+            )
+            "A" -> Triple(
+                "A",
+                ZedColors.Success,
+                if (dark) ZedColors.AddedBackgroundDark else ZedColors.AddedBackgroundLight
+            )
+            "D" -> Triple(
+                "D",
+                ZedColors.Danger,
+                if (dark) ZedColors.RemovedBackgroundDark else ZedColors.RemovedBackgroundLight
+            )
+            "R" -> Triple(
+                "R",
+                ZedColors.Info,
+                if (dark) Color(0xFF1E293B) else Color(0xFFE0E7FF)
+            )
+            else -> Triple(
+                "?",
+                MaterialTheme.colorScheme.onSurfaceVariant,
+                MaterialTheme.colorScheme.surfaceContainerHigh
+            )
         }
 
         Box(
             modifier = Modifier
                 .size(18.dp)
                 .clip(RoundedCornerShape(4.dp))
-                .background(badgeColor.copy(alpha = 0.2f)),
+                .background(badgeBg),
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = badgeLabel,
+                text = badgeChar,
                 style = TextStyle(
                     fontFamily = MonoFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = badgeColor,
                 ),
             )
         }
 
-        Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.width(10.dp))
 
-        // File Path
-        Text(
-            text = file.path,
-            style = TextStyle(
-                fontFamily = MonoFamily,
-                fontSize = 12.sp,
-                color = ZedColors.DarkText,
-            ),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        // File Path (styled like Zed desktop)
+        val fileName = file.path.substringAfterLast('/')
+        val dirPath = file.path.substringBeforeLast('/', "")
+
+        Row(
             modifier = Modifier.weight(1f),
-        )
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (dirPath.isNotBlank()) {
+                Text(
+                    text = "$dirPath/",
+                    style = TextStyle(
+                        fontFamily = MonoFamily,
+                        fontSize = 12.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = fileName,
+                style = TextStyle(
+                    fontFamily = MonoFamily,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
 @Composable
 private fun GitGraphTab(commits: List<GitCommitInfo>) {
+    val dark = isSystemInDarkTheme()
     if (commits.isEmpty()) {
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
+            modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                "No commit history found.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = ZedColors.DarkMuted,
+                "No git commit history available",
+                style = TextStyle(
+                    fontFamily = InterFamily,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
             )
         }
         return
@@ -601,15 +765,16 @@ private fun GitGraphTab(commits: List<GitCommitInfo>) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(vertical = 8.dp),
     ) {
         items(commits, key = { it.hash }) { commit ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 6.dp),
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.Top,
             ) {
-                // Commit Graph Node & Stem
+                // Visual Timeline Graph Node
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.width(20.dp),
@@ -624,11 +789,11 @@ private fun GitGraphTab(commits: List<GitCommitInfo>) {
                         modifier = Modifier
                             .width(2.dp)
                             .height(48.dp)
-                            .background(ZedColors.DarkHairline),
+                            .background(MaterialTheme.colorScheme.outline),
                     )
                 }
 
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(12.dp))
 
                 // Commit Details
                 Column(modifier = Modifier.weight(1f)) {
@@ -645,7 +810,7 @@ private fun GitGraphTab(commits: List<GitCommitInfo>) {
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                                .padding(horizontal = 5.dp, vertical = 2.dp),
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
                         )
 
                         // Branch / Tag Decoration if present
@@ -656,13 +821,13 @@ private fun GitGraphTab(commits: List<GitCommitInfo>) {
                                 style = TextStyle(
                                     fontFamily = MonoFamily,
                                     fontSize = 10.5.sp,
-                                    color = Color(0xFF34D399),
+                                    color = if (dark) Color(0xFF34D399) else Color(0xFF059669),
                                 ),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
-                                    .background(Color(0xFF153323))
+                                    .background(if (dark) Color(0xFF153323) else Color(0xFFD1FAE5))
                                     .padding(horizontal = 5.dp, vertical = 2.dp),
                             )
                         }
@@ -672,8 +837,11 @@ private fun GitGraphTab(commits: List<GitCommitInfo>) {
                         // Relative Time
                         Text(
                             text = commit.date,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ZedColors.DarkFaint,
+                            style = TextStyle(
+                                fontFamily = InterFamily,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
                         )
                     }
 
@@ -684,9 +852,9 @@ private fun GitGraphTab(commits: List<GitCommitInfo>) {
                         text = commit.message,
                         style = TextStyle(
                             fontFamily = InterFamily,
-                            fontSize = 13.sp,
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.Medium,
-                            color = ZedColors.DarkText,
+                            color = MaterialTheme.colorScheme.onSurface,
                         ),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -696,8 +864,11 @@ private fun GitGraphTab(commits: List<GitCommitInfo>) {
                     if (commit.author.isNotBlank()) {
                         Text(
                             text = commit.author,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = ZedColors.DarkMuted,
+                            style = TextStyle(
+                                fontFamily = InterFamily,
+                                fontSize = 11.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
                         )
                     }
                 }

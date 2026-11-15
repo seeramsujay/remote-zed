@@ -77,7 +77,6 @@ internal fun ZedAppContent(
     allowScreenshots: Boolean = false,
     onAllowScreenshotsChange: (Boolean) -> Unit = {},
     onOpenDrawer: () -> Unit = {},
-    onOpenGitDrawer: () -> Unit = {},
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
@@ -88,7 +87,6 @@ internal fun ZedAppContent(
                     state = state,
                     vm = vm,
                     onOpenDrawer = onOpenDrawer,
-                    onOpenGitDrawer = onOpenGitDrawer,
                 )
             },
             floatingActionButton = {
@@ -136,6 +134,7 @@ internal fun ZedAppContent(
                         Page.PROJECTS -> HomeScreen(state = state, vm = vm)
                         Page.CHAT -> ChatScreen(state = state, vm = vm)
                         Page.CHANGES -> ChangesScreen(state = state, vm = vm)
+                        Page.GIT -> GitScreen(state = state, vm = vm)
                         Page.SETTINGS -> SettingsScreen(
                             state = state,
                             vm = vm,
@@ -213,7 +212,7 @@ private fun PullToRefreshPage(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    val refreshable = state.page == Page.PROJECTS || state.page == Page.CHANGES
+    val refreshable = state.page == Page.PROJECTS || state.page == Page.CHANGES || state.page == Page.GIT
     if (!refreshable) {
         Box(modifier = modifier) { content() }
         return
@@ -248,7 +247,6 @@ private fun ZedTopBar(
     state: MobileState,
     vm: ZedViewModel,
     onOpenDrawer: () -> Unit,
-    onOpenGitDrawer: () -> Unit = {},
 ) {
     val colors = TopAppBarDefaults.topAppBarColors(
         containerColor = ZedColors.Background,
@@ -268,6 +266,30 @@ private fun ZedTopBar(
             navigationIcon = {
                 IconButton(onClick = onOpenDrawer) {
                     Icon(Symbols.Menu, contentDescription = "Open navigation menu", modifier = Modifier.size(22.dp))
+                }
+            },
+            colors = colors,
+        )
+
+        Page.GIT -> CenterAlignedTopAppBar(
+            title = {
+                Text(
+                    "Source Control",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                )
+            },
+            navigationIcon = {
+                IconButton(onClick = onOpenDrawer) {
+                    Icon(Symbols.Menu, contentDescription = "Open navigation menu", modifier = Modifier.size(22.dp))
+                }
+            },
+            actions = {
+                IconButton(onClick = { vm.loadGitStatus(); vm.loadGitLog() }) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Refresh Git Status",
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
             },
             colors = colors,
@@ -319,10 +341,10 @@ private fun ZedTopBar(
             },
             navigationIcon = back,
             actions = {
-                IconButton(onClick = onOpenGitDrawer) {
+                IconButton(onClick = { vm.showGit() }) {
                     Icon(
                         imageVector = Icons.Default.AccountTree,
-                        contentDescription = "Open Git Panel",
+                        contentDescription = "Open Git",
                         modifier = Modifier.size(20.dp),
                         tint = MaterialTheme.colorScheme.primary,
                     )
@@ -340,10 +362,10 @@ private fun ZedTopBar(
             },
             navigationIcon = back,
             actions = {
-                IconButton(onClick = onOpenGitDrawer) {
+                IconButton(onClick = { vm.showGit() }) {
                     Icon(
                         imageVector = Icons.Default.AccountTree,
-                        contentDescription = "Open Git Panel",
+                        contentDescription = "Open Git",
                         modifier = Modifier.size(20.dp),
                         tint = MaterialTheme.colorScheme.primary,
                     )
@@ -422,6 +444,7 @@ internal fun MobileNavigationDrawer(
                 Text("Zed", style = MaterialTheme.typography.headlineSmall, color = ZedColors.DarkText)
             }
             DrawerItem(Symbols.Projects, "Projects", state.page == Page.PROJECTS) { onDestination(Page.PROJECTS) }
+            DrawerItem(Icons.Default.AccountTree, "Git", state.page == Page.GIT) { onDestination(Page.GIT) }
             DrawerItem(Symbols.Folder, "Files", state.page == Page.FILES) { onDestination(Page.FILES) }
             DrawerItem(Symbols.Terminal, "Terminal", state.page == Page.TERMINAL) { onDestination(Page.TERMINAL) }
             DrawerItem(Symbols.Settings, "Settings", state.page == Page.SETTINGS) { onDestination(Page.SETTINGS) }

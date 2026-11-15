@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-enum class Page { PAIR, PROJECTS, CHAT, CHANGES, SETTINGS, TERMINAL, FILES }
+enum class Page { PAIR, PROJECTS, CHAT, CHANGES, SETTINGS, TERMINAL, FILES, GIT }
 
 /** A thread with the project it belongs to, for lists that span projects. */
 data class RecentThread(val thread: ThreadSummary, val project: Project)
@@ -889,6 +889,14 @@ class ZedViewModel(
 
     fun showFiles() {
         if (!mutable.value.busy) navigate(Page.FILES)
+    }
+
+    fun showGit() {
+        if (!mutable.value.busy) {
+            navigate(Page.GIT)
+            loadGitStatus()
+            loadGitLog()
+        }
     }
 
     suspend fun executeTerminal(command: String): TerminalExecResponse {
