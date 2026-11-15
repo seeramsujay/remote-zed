@@ -996,7 +996,6 @@ impl WebSocketGateway {
                         Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
                     }
                 }
-                }
                 ("GET", "/v2/events") => {
                     let sse_header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
                     if stream.write_all(sse_header.as_bytes()).await.is_ok() {
