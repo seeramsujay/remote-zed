@@ -574,6 +574,14 @@ impl WebSocketGateway {
                 "version": "2.0.0",
                 "gateway": "zed-remote-daemon"
             }))
+        } else if path == "/v1/status" {
+            (200, serde_json::json!({
+                "status": "ok",
+                "api_version": 1,
+                "name": "Zed-Desktop",
+                "version": "2.0.0",
+                "gateway": "zed-remote-daemon"
+            }))
         } else if path == "/v2/pair/claim" && method == "POST" {
             (200, serde_json::json!({
                 "device_id": "bunker-phone",

@@ -46,7 +46,12 @@ class HttpZedRepository private constructor(
 
     override suspend fun checkStatus() {
         val value = request("GET", listOf("status"))
-        if (value.number("api_version") != apiVersion || value.string("name") != "Zed-Desktop") {
+        val isDaemon = value.optionalString("gateway") == "zed-remote-daemon"
+        val remoteVersion = value.optionalNumber("api_version")
+            ?: value.optionalString("api_version")?.toIntOrNull()
+            ?: (if (isDaemon) apiVersion else null)
+        val name = value.optionalString("name") ?: (if (isDaemon) "Zed-Desktop" else null)
+        if (remoteVersion != apiVersion || (name != "Zed-Desktop" && !isDaemon)) {
             throw GatewayException("Incompatible desktop. Expected Zed-Desktop API v$apiVersion.")
         }
     }
