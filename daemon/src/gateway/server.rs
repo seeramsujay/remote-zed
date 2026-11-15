@@ -518,7 +518,7 @@ impl WebSocketGateway {
         auth: AuthValidator,
         terminal: Arc<TerminalManager>,
         _git: GitEngine,
-        _session_manager: SessionManager,
+        session_manager: SessionManager,
         router: MessageRouter,
         thread_state: Arc<tokio::sync::Mutex<ThreadState>>,
     ) -> Result<()> {
@@ -784,11 +784,15 @@ impl WebSocketGateway {
             } else if (path.starts_with("/v2/threads/") || path.starts_with("/threads/")) && method == "GET" {
                 let state = thread_state.lock().await;
                 let approvals = router.get_pending_approvals().await;
+                let mut messages = state.messages.clone();
+                if messages.is_empty() {
+                    messages = session_manager.get_chat_messages(None).await;
+                }
                 (200, serde_json::json!({
                     "id": "main-thread",
                     "title": "AntiGravity AI Workspace",
                     "status": "ready",
-                    "messages": state.messages,
+                    "messages": messages,
                     "transcript": state.transcript,
                     "approvals": approvals,
                     "elicitations": []
