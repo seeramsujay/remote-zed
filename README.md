@@ -2,11 +2,13 @@
 
 # ⚡ Zed Remote
 
-**Control your local Zed AI sessions, approve agent tool permissions, execute Git workflows, and command host workspaces directly from your Android phone.**
+**Control your local Zed AI sessions, approve agent tool permissions, execute Git workflows, and command host workspaces directly from your mobile phone.**
 
 [![CI](https://github.com/seeramsujay/remote-zed/actions/workflows/ci.yml/badge.svg)](https://github.com/seeramsujay/remote-zed/actions/workflows/ci.yml)
 [![Android](https://img.shields.io/badge/Platform-Android_12+-3DDC84?logo=android&logoColor=white)](https://android.com)
+[![iOS](https://img.shields.io/badge/Platform-iOS_16+-000000?logo=apple&logoColor=white)](https://apple.com)
 [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack_Compose_Material_3-4285F4?logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
+[![Flutter](https://img.shields.io/badge/UI-Flutter_3-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
 [![Zed Compatible](https://img.shields.io/badge/Editor-Zed_Official-087EA4?logo=rust&logoColor=white)](https://zed.dev)
 [![Tunnel Security](https://img.shields.io/badge/Tunnel-AES--256--GCM_%2B_SSH_443-purple?logo=wireguard&logoColor=white)](#-bunker-tunnel--firewall-bypass)
 
@@ -18,6 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/seeramsujay/remote-zed/main/install
 
 [Features](#-key-features) •
 [Quick Start](#-quick-start) •
+[Mobile Apps](#-mobile-app-setup-android--ios) •
 [Bunker Tunnel](#-bunker-tunnel--firewall-bypass) •
 [Desktop Integration](#-zero-rebuild-integration-with-official-zed) •
 [Architecture](#-architecture) •
@@ -36,7 +39,7 @@ When working away from your desk—whether commuting, in a college hostel, or tr
 - **Tailscale / WireGuard**: Frequently blocked on restrictive networks (e.g. Fortinet, college Wi-Fi, or corporate firewalls blocking UDP 41641).
 
 **Zed Remote solves this at the protocol level:**
-Instead of streaming pixels, Zed Remote intercepts the **Agent Client Protocol (ACP)** JSON-RPC streams over standard I/O pipes. It forwards token-by-token reasoning chunks, tool approval cards, and repository state directly to a native **Material 3 / Material You Android app** over a firewall-proof, AES-256-GCM encrypted tunnel.
+Instead of streaming pixels, Zed Remote intercepts the **Agent Client Protocol (ACP)** JSON-RPC streams over standard I/O pipes. It forwards token-by-token reasoning chunks, tool approval cards, and repository state directly to native **Android (Material 3 / Jetpack Compose or Flutter)** and **iOS (Flutter)** apps over a firewall-proof, AES-256-GCM encrypted tunnel.
 
 ---
 
@@ -50,6 +53,8 @@ Instead of streaming pixels, Zed Remote intercepts the **Agent Client Protocol (
 | 📁 **Workspace Control & Folder Opening** | Browse remote directories, create new project folders, and tap **"Set Workspace"** to instantly open that project inside the desktop Zed GUI via local socket IPC. |
 | 🌿 **Mobile Git Operations** | Review diffs with syntax highlighting, stage modified files, write commit messages, and push to GitHub/GitLab directly from your phone. |
 | 🎨 **Material 3 / Material You** | Handcrafted native Jetpack Compose interface with Android 12+ wallpaper dynamic color extraction and obsidian dark mode. |
+| 📱 **Dual UI Options (Compose & Flutter)** | Choose between native Jetpack Compose or Flutter depending on your preferred look and feel. |
+| 🍏 **iOS / iPadOS Support** | Unsigned IPA ready to sideload via AltStore, Sideloadly, TrollStore, or LiveContainer. |
 | 🏰 **Bunker Tunnel (Zero-Trust)** | Outbound reverse tunnel over SSH port 443 that bypasses Fortinet firewalls with zero-knowledge, 48-char random hex rendezvous and end-to-end AES-256-GCM encryption. |
 
 ---
@@ -86,8 +91,10 @@ Zed Remote places a lightweight proxy daemon between Zed and your AI agent execu
                            ▲
                            │ Decrypts with Scanned Key
               ┌────────────┴────────────┐
-              │ Native Android App (M3) │
-              │ [Agent][Term][Files][Git│
+              │ Mobile Clients          │
+              │ • Android Jetpack M3    │
+              │ • Android Flutter       │
+              │ • iOS Flutter (IPA)     │
               └─────────────────────────┘
 ```
 
@@ -110,9 +117,14 @@ zed-tunnel
 
 ---
 
-### Mobile App Setup (Phone)
+### 📱 Mobile App Setup (Android & iOS)
 
-1. **Download APK**: Grab **`zed-remote.apk`** from [**Releases**](https://github.com/seeramsujay/remote-zed/releases) and tap install on your Android phone.
+Choose the client that fits your workflow:
+- 🤖 **Native Jetpack Compose (Recommended)**: Download **`zed-remote.apk`** for Android 12+ dynamic Material You colors and fast UI rendering.
+- 💙 **Flutter Mobile (Android)**: Download **`zed-remote-flutter.apk`** for the cross-platform Flutter experience.
+- 🍏 **Flutter Mobile (iOS / iPadOS)**: Download **`zed-remote-ios-unsigned.ipa`** and sideload it via AltStore, Sideloadly, TrollStore, or LiveContainer.
+
+1. **Install App**: Download your preferred client from [**Releases**](https://github.com/seeramsujay/remote-zed/releases).
 2. **Scan QR Code**: Open the app, tap the **Scan QR** icon, and scan the terminal QR code printed by `zed-tunnel`.
 3. **Control From Anywhere**: Prompt your agent, approve tool actions, run terminal commands, and open project folders off-the-grid!
 
@@ -156,20 +168,27 @@ Symlinks the extension at `extensions/zed-remote` into Zed's dev extension path:
 
 ## 📦 Releases & Cloud Builds
 
-You don't need to heat up your laptop compiling APKs. GitHub Actions automatically builds and publishes releases on GitHub's cloud runners for free:
+You don't need to heat up your laptop compiling APKs or IPAs. GitHub Actions automatically builds and publishes releases on GitHub's cloud runners for free:
 
 ```bash
 # Tag and push to trigger automated cloud build
-git tag v1.0.0
-git push origin v1.0.0
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
-GitHub Actions will compile the Material 3 Compose APK (**`zed-remote.apk`**) and the Linux host daemon (**`zed-remote-daemon-linux-x86_64.tar.gz`**) and attach them to a fresh GitHub Release.
+GitHub Actions will compile in parallel:
+- 🤖 **`zed-remote.apk`**: Native Material 3 / Jetpack Compose Android client.
+- 💙 **`zed-remote-flutter.apk`**: Cross-platform Flutter Android client.
+- 🍏 **`zed-remote-ios-unsigned.ipa`**: Unsigned iOS application bundle for AltStore / Sideloadly / TrollStore.
+- 🐧 **`zed-remote-daemon-linux-x86_64.tar.gz`**: Precompiled high-performance Rust host daemon binary.
 
 To build manually on your workstation:
 ```bash
 # Build Compose APK locally
 ./build-all.sh compose
+
+# Build Flutter APK locally
+./build-all.sh flutter
 
 # Build Rust daemon locally
 ./build-all.sh daemon
@@ -184,6 +203,9 @@ remote-zed/
 ├── android/            # Native Android App (Material 3, Jetpack Compose, dynamic colors)
 │   ├── app/src/main/   # UI Screens, ViewModel, Terminal, Files, and Bunker client
 │   └── build.gradle.kts
+├── app/                # Cross-platform Flutter App (Android & iOS)
+│   ├── lib/            # Dual-panel layout, ACP streaming, Terminal, Bunker crypto
+│   └── pubspec.yaml
 ├── daemon/             # High-performance Rust host daemon (Tokio, ACP Proxy, Git & Shell engine)
 │   ├── src/gateway/    # Dual HTTP REST/SSE and WebSocket gateway
 │   ├── src/terminal/   # Terminal execution and remote filesystem operations

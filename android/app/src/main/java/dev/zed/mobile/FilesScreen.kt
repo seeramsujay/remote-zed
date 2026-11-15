@@ -58,9 +58,9 @@ import kotlinx.coroutines.launch
 data class RemoteFileItem(
     val name: String,
     val path: String,
-    val isDir: Boolean,
-    val sizeBytes: Long,
-    val modifiedEpochSecs: Long,
+    val isDir: Boolean = false,
+    val sizeBytes: Long = 0L,
+    val modifiedEpochSecs: Long = 0L,
 ) {
     val humanSize: String
         get() {

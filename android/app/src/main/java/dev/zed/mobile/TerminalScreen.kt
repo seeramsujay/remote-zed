@@ -372,8 +372,8 @@ private fun TermuxQuickKey(
 }
 
 data class TerminalExecResponse(
-    val stdout: String,
-    val stderr: String,
-    val exitCode: Int,
-    val cwd: String,
+    val stdout: String = "",
+    val stderr: String = "",
+    val exitCode: Int = 0,
+    val cwd: String = "",
 )

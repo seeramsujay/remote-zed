@@ -337,7 +337,7 @@ class HttpZedRepository private constructor(
         val stdout = response.get("stdout")?.asString ?: ""
         val stderr = response.get("stderr")?.asString ?: ""
         val exitCode = response.get("exit_code")?.asInt ?: response.get("exitCode")?.asInt ?: 0
-        val cwd = response.get("cwd")?.asString
+        val cwd = response.get("cwd")?.asString ?: ""
         return TerminalExecResponse(stdout, stderr, exitCode, cwd)
     }
 
@@ -351,9 +351,9 @@ class HttpZedRepository private constructor(
             RemoteFileItem(
                 name = obj.get("name")?.asString ?: return@mapNotNull null,
                 path = obj.get("path")?.asString ?: return@mapNotNull null,
-                isDirectory = obj.get("is_dir")?.asBoolean ?: obj.get("is_directory")?.asBoolean ?: false,
-                sizeBytes = obj.get("size")?.asLong ?: obj.get("size_bytes")?.asLong,
-                modified = obj.get("modified")?.asString,
+                isDir = obj.get("is_dir")?.asBoolean ?: obj.get("is_directory")?.asBoolean ?: false,
+                sizeBytes = obj.get("size")?.asLong ?: obj.get("size_bytes")?.asLong ?: 0L,
+                modifiedEpochSecs = obj.get("modified_epoch_secs")?.asLong ?: obj.get("modified")?.asLong ?: 0L,
             )
         } ?: emptyList()
         return FsDirectoryResult(currentPath, parentPath, items)
