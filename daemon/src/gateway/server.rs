@@ -18,6 +18,24 @@ use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 
+/// State of an active thread for v2 mobile clients.
+#[derive(Clone, Debug)]
+pub struct ThreadState {
+    pub current_mode: String,
+    pub messages: Vec<serde_json::Value>,
+    pub transcript: Vec<serde_json::Value>,
+}
+
+impl Default for ThreadState {
+    fn default() -> Self {
+        Self {
+            current_mode: "yolo".to_string(),
+            messages: Vec::new(),
+            transcript: Vec::new(),
+        }
+    }
+}
+
 /// Orchestrates the mobile WebSocket gateway.
 pub struct WebSocketGateway {
     bind_addr: SocketAddr,
@@ -27,6 +45,7 @@ pub struct WebSocketGateway {
     git: GitEngine,
     telemetry: Arc<TelemetryCollector>,
     terminal: Arc<TerminalManager>,
+    thread_state: Arc<tokio::sync::Mutex<ThreadState>>,
 }
 
 impl WebSocketGateway {
@@ -48,6 +67,7 @@ impl WebSocketGateway {
             git,
             telemetry,
             terminal,
+            thread_state: Arc::new(tokio::sync::Mutex::new(ThreadState::default())),
         }
     }
 
@@ -66,6 +86,7 @@ impl WebSocketGateway {
                     let git = self.git.clone();
                     let telemetry = Arc::clone(&self.telemetry);
                     let terminal = Arc::clone(&self.terminal);
+                    let thread_state = Arc::clone(&self.thread_state);
 
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_connection(
@@ -77,6 +98,7 @@ impl WebSocketGateway {
                             git,
                             telemetry,
                             terminal,
+                            thread_state,
                         )
                         .await
                         {
@@ -101,6 +123,7 @@ impl WebSocketGateway {
         git: GitEngine,
         telemetry: Arc<TelemetryCollector>,
         terminal: Arc<TerminalManager>,
+        thread_state: Arc<tokio::sync::Mutex<ThreadState>>,
     ) -> Result<()> {
         // Detect standard HTTP REST requests vs WebSocket upgrades
         let mut peek_buf = [0u8; 512];
@@ -108,7 +131,12 @@ impl WebSocketGateway {
         let peek_str = std::str::from_utf8(&peek_buf[..bytes_peeked]).unwrap_or("");
 
         let is_websocket = peek_str.to_lowercase().contains("upgrade: websocket");
-        if !is_websocket && (peek_str.starts_with("GET ") || peek_str.starts_with("POST ") || peek_str.starts_with("OPTIONS ")) {
+        let is_http = peek_str.starts_with("GET ")
+            || peek_str.starts_with("POST ")
+            || peek_str.starts_with("PUT ")
+            || peek_str.starts_with("DELETE ")
+            || peek_str.starts_with("OPTIONS ");
+        if !is_websocket && is_http {
             return Self::handle_http_request(
                 stream,
                 peer_addr,
@@ -117,6 +145,7 @@ impl WebSocketGateway {
                 git,
                 session_manager,
                 router,
+                thread_state,
             ).await;
         }
 
@@ -491,6 +520,7 @@ impl WebSocketGateway {
         _git: GitEngine,
         _session_manager: SessionManager,
         router: MessageRouter,
+        thread_state: Arc<tokio::sync::Mutex<ThreadState>>,
     ) -> Result<()> {
         let mut buffer = vec![0u8; 16384];
         let bytes_read = stream.read(&mut buffer).await.unwrap_or(0);
@@ -588,19 +618,136 @@ impl WebSocketGateway {
                         "is_native": false
                     }]
                 }))
+            } else if path.contains("/threads/") && path.ends_with("/configuration") {
+                if method == "PUT" {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let mut state = thread_state.lock().await;
+                    if let Some(mode_id) = body_json.get("mode_id").and_then(|v| v.as_str()) {
+                        state.current_mode = mode_id.to_string();
+                    }
+                    let mode = state.current_mode.clone();
+                    drop(state);
+                    (200, serde_json::json!({
+                        "model": null,
+                        "thinking_enabled": false,
+                        "agent": {
+                            "id": "antigravity",
+                            "name": "AntiGravity Agent",
+                            "is_native": false
+                        },
+                        "modes": {
+                            "current": mode,
+                            "available": [
+                                {
+                                    "id": "yolo",
+                                    "name": "YOLO",
+                                    "description": "Autonomous auto-pilot with auto-approved permissions (--dangerously-skip-permissions)"
+                                },
+                                {
+                                    "id": "auto",
+                                    "name": "Auto",
+                                    "description": "Autonomous execution with permission confirmations"
+                                },
+                                {
+                                    "id": "plan",
+                                    "name": "Plan",
+                                    "description": "Read-only planning without modifications"
+                                }
+                            ]
+                        },
+                        "options": []
+                    }))
+                } else {
+                    let state = thread_state.lock().await;
+                    let mode = state.current_mode.clone();
+                    drop(state);
+                    (200, serde_json::json!({
+                        "model": null,
+                        "thinking_enabled": false,
+                        "agent": {
+                            "id": "antigravity",
+                            "name": "AntiGravity Agent",
+                            "is_native": false
+                        },
+                        "modes": {
+                            "current": mode,
+                            "available": [
+                                {
+                                    "id": "yolo",
+                                    "name": "YOLO",
+                                    "description": "Autonomous auto-pilot with auto-approved permissions (--dangerously-skip-permissions)"
+                                },
+                                {
+                                    "id": "auto",
+                                    "name": "Auto",
+                                    "description": "Autonomous execution with permission confirmations"
+                                },
+                                {
+                                    "id": "plan",
+                                    "name": "Plan",
+                                    "description": "Read-only planning without modifications"
+                                }
+                            ]
+                        },
+                        "options": []
+                    }))
+                }
             } else if path.contains("/threads/") && path.ends_with("/changes") && method == "GET" {
                 (200, serde_json::json!({
                     "files": []
                 }))
             } else if path.contains("/threads/") && method == "GET" {
+                let state = thread_state.lock().await;
                 (200, serde_json::json!({
                     "id": "main-thread",
                     "title": "AntiGravity AI Workspace",
                     "status": "ready",
-                    "messages": [],
-                    "transcript": []
+                    "messages": state.messages,
+                    "transcript": state.transcript
                 }))
-            } else if method == "POST" && (path.ends_with("/messages") || path.ends_with("/cancel")) {
+            } else if path.contains("/threads/") && path.ends_with("/messages") && method == "POST" {
+                let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                let text = body_json.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                if !text.is_empty() {
+                    let mut state = thread_state.lock().await;
+                    state.messages.push(serde_json::json!({
+                        "role": "user",
+                        "text": text
+                    }));
+                    state.transcript.push(serde_json::json!({
+                        "kind": "user_message",
+                        "body": text,
+                        "timestamp": chrono::Utc::now().to_rfc3339()
+                    }));
+                    drop(state);
+
+                    let prompt_rpc = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "session/prompt",
+                        "params": {
+                            "sessionId": "default",
+                            "prompt": [{
+                                "type": "text",
+                                "text": text
+                            }]
+                        }
+                    }).to_string();
+                    let _ = router.handle_mobile_message(&prompt_rpc).await;
+                }
+                (200, serde_json::json!({
+                    "accepted": true
+                }))
+            } else if path.contains("/threads/") && path.ends_with("/cancel") && method == "POST" {
+                let cancel_rpc = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "session/cancel",
+                    "params": {
+                        "sessionId": "default"
+                    }
+                }).to_string();
+                let _ = router.handle_mobile_message(&cancel_rpc).await;
                 (200, serde_json::json!({
                     "accepted": true
                 }))

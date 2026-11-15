@@ -278,6 +278,8 @@ class ZedViewModel(
                 origin = resolvedOrigin,
                 deviceId = "bunker-phone",
                 credential = bunker.token,
+                bunkerTopic = bunker.ntfyTopic,
+                bunkerKey = bunker.encryptionKeyBase64,
             )
             val candidate = connectV2(credential)
             candidate.checkStatus()
@@ -348,6 +350,24 @@ class ZedViewModel(
             handleRevokedCredential()
             return@task
         } catch (_: Exception) {
+            if (credential.bunkerTopic != null && credential.bunkerKey != null) {
+                try {
+                    val freshOrigin = BunkerTunnel.resolveTunnelUrl(
+                        BunkerConfig(credential.bunkerTopic, credential.bunkerKey, credential.credential)
+                    )
+                    if (freshOrigin.isNotBlank() && freshOrigin != credential.origin) {
+                        val refreshed = credential.copy(origin = freshOrigin)
+                        val retryCandidate = connectV2(refreshed)
+                        retryCandidate.checkStatus()
+                        credentialStore.save(refreshed)
+                        activeV2Credential = refreshed
+                        repository = retryCandidate
+                        mutable.value = mutable.value.copy(host = refreshed.origin.trim(), gatewayUnavailable = false)
+                        syncV2Projects(refreshed, retryCandidate)
+                        return@task
+                    }
+                } catch (_: Exception) {}
+            }
             // Retain the validated repository instance so an explicit refresh can retry later.
             repository = candidate
             mutable.value = mutable.value.copy(gatewayUnavailable = true)
@@ -497,6 +517,30 @@ class ZedViewModel(
                 else mutable.value = mutable.value.copy(error = message(error))
             } catch (error: Exception) {
                 if (repository !== repo) return@launch
+                val cred = activeV2Credential
+                if (cred?.bunkerTopic != null && cred.bunkerKey != null) {
+                    try {
+                        val freshOrigin = BunkerTunnel.resolveTunnelUrl(
+                            BunkerConfig(cred.bunkerTopic, cred.bunkerKey, cred.credential)
+                        )
+                        if (freshOrigin.isNotBlank() && freshOrigin != cred.origin) {
+                            val refreshed = cred.copy(origin = freshOrigin)
+                            val retryCandidate = connectV2(refreshed)
+                            val freshProjects = retryCandidate.projects()
+                            saveProjectCatalog(refreshed, freshProjects)
+                            credentialStore.save(refreshed)
+                            activeV2Credential = refreshed
+                            repository = retryCandidate
+                            mutable.value = mutable.value.copy(
+                                host = refreshed.origin.trim(),
+                                projects = freshProjects,
+                                gatewayUnavailable = false,
+                            )
+                            startThreadLoad(retryCandidate, freshProjects)
+                            return@launch
+                        }
+                    } catch (_: Exception) {}
+                }
                 // Keep the last authenticated catalog on screen, but never treat it as live.
                 mutable.value = if (activeV2Credential != null) {
                     mutable.value.copy(gatewayUnavailable = true)

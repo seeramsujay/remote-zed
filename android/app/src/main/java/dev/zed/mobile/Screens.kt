@@ -27,6 +27,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -42,6 +44,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,7 +56,12 @@ internal fun PairScreen(
     scanning: Boolean,
     scannerFeedback: String?,
     onScanQr: () -> Unit,
+    onPastePairing: (String) -> Unit = {},
 ) {
+    var manualPayload by remember { mutableStateOf("") }
+    var showManualInput by remember { mutableStateOf(false) }
+    val clipboardManager = LocalClipboardManager.current
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -65,14 +73,14 @@ internal fun PairScreen(
         Text("Connect to Zed Desktop", style = MaterialTheme.typography.headlineSmall, color = ZedColors.Text)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Continue Agent threads from your phone over your private Tailscale network.",
+            "Continue Agent threads from your phone over your private Tailscale network or secure Bunker tunnel.",
             style = MaterialTheme.typography.bodyLarge,
             color = ZedColors.Muted,
         )
         Spacer(Modifier.height(32.dp))
-        PairingStep("1", "On desktop, open Settings → Mobile Gateway.")
-        PairingStep("2", "Choose Connect mobile device to show a QR code.")
-        PairingStep("3", "Scan it here. The code works once and expires in two minutes.")
+        PairingStep("1", "On desktop, run 'zed-tunnel --bind' or open Settings → Mobile Gateway.")
+        PairingStep("2", "Scan the pairing QR code or copy the ZEDBUNKER payload.")
+        PairingStep("3", "Scan here, or tap 'Paste from clipboard' to pair instantly.")
         Spacer(Modifier.height(28.dp))
         SmallButton(
             text = if (scanning) "Opening scanner…" else "Scan pairing code",
@@ -83,8 +91,74 @@ internal fun PairScreen(
                 .fillMaxWidth()
                 .height(48.dp),
         )
+        Spacer(Modifier.height(10.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            SmallButton(
+                text = "Paste from clipboard",
+                onClick = {
+                    val clip = clipboardManager.getText()?.text?.trim()
+                    if (!clip.isNullOrBlank()) {
+                        onPastePairing(clip)
+                    }
+                },
+                enabled = !busy && !scanning,
+                tone = ButtonTone.Secondary,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(44.dp),
+            )
+            SmallButton(
+                text = if (showManualInput) "Hide text" else "Enter text",
+                onClick = { showManualInput = !showManualInput },
+                enabled = !busy && !scanning,
+                tone = ButtonTone.Secondary,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(44.dp),
+            )
+        }
+        if (showManualInput) {
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
+                value = manualPayload,
+                onValueChange = { manualPayload = it },
+                placeholder = {
+                    Text(
+                        "Paste ZEDBUNKER:... or pair ticket",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ZedColors.Faint,
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = false,
+                maxLines = 3,
+                textStyle = MaterialTheme.typography.bodySmall.copy(color = ZedColors.Text),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = ZedColors.Accent,
+                    unfocusedBorderColor = ZedColors.Border,
+                    cursorColor = ZedColors.Accent,
+                ),
+            )
+            Spacer(Modifier.height(8.dp))
+            SmallButton(
+                text = "Connect with payload",
+                onClick = {
+                    if (manualPayload.isNotBlank()) {
+                        onPastePairing(manualPayload.trim())
+                    }
+                },
+                enabled = !busy && manualPayload.isNotBlank(),
+                tone = ButtonTone.Primary,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp),
+            )
+        }
         scannerFeedback?.let {
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(8.dp))
             InlineNotice(it, modifier = Modifier.padding(horizontal = 0.dp))
         }
         Spacer(Modifier.height(24.dp))

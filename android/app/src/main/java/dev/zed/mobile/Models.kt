@@ -252,6 +252,8 @@ data class DeviceCredential(
     val origin: String,
     val deviceId: String,
     val credential: String,
+    val bunkerTopic: String? = null,
+    val bunkerKey: String? = null,
 )
 
 interface ZedRepository {

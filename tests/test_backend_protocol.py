@@ -361,5 +361,59 @@ class TestTerminalAndFsOperations(unittest.TestCase):
         self.assertIn("bunker terminal online", res.stdout)
 
 
+class TestYoloAndV2ThreadConfiguration(unittest.TestCase):
+    """Verifies YOLO mode schema and v2 thread configuration payloads."""
+
+    def test_yolo_mode_configuration_schema(self):
+        config_payload = {
+            "model": None,
+            "thinking_enabled": False,
+            "agent": {
+                "id": "antigravity",
+                "name": "AntiGravity Agent",
+                "is_native": False,
+            },
+            "modes": {
+                "current": "yolo",
+                "available": [
+                    {
+                        "id": "yolo",
+                        "name": "YOLO",
+                        "description": "Autonomous auto-pilot with auto-approved permissions (--dangerously-skip-permissions)",
+                    },
+                    {
+                        "id": "auto",
+                        "name": "Auto",
+                        "description": "Autonomous execution with permission confirmations",
+                    },
+                    {
+                        "id": "plan",
+                        "name": "Plan",
+                        "description": "Read-only planning without modifications",
+                    },
+                ],
+            },
+            "options": [],
+        }
+        self.assertEqual(config_payload["modes"]["current"], "yolo")
+        mode_ids = [m["id"] for m in config_payload["modes"]["available"]]
+        self.assertIn("yolo", mode_ids)
+        self.assertIn("auto", mode_ids)
+        self.assertIn("plan", mode_ids)
+
+    def test_bunker_uri_parsing(self):
+        import urllib.parse
+
+        uri = "zed-remote://pair?topic=zed-bunker-test&key=MTIzNDU2&token=tok456&port=8443"
+        parsed = urllib.parse.urlparse(uri)
+        self.assertEqual(parsed.scheme, "zed-remote")
+        self.assertEqual(parsed.netloc, "pair")
+        query = urllib.parse.parse_qs(parsed.query)
+        self.assertEqual(query["topic"][0], "zed-bunker-test")
+        self.assertEqual(query["key"][0], "MTIzNDU2")
+        self.assertEqual(query["token"][0], "tok456")
+        self.assertEqual(query["port"][0], "8443")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

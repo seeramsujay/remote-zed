@@ -51,6 +51,23 @@ object BunkerTunnel {
             }
 
             raw.trim().startsWith("{") && raw.contains("ntfy_topic") -> raw.trim()
+            raw.trim().startsWith("zed-remote://pair") -> {
+                try {
+                    val uri = java.net.URI(raw.trim())
+                    val query = uri.rawQuery ?: ""
+                    val params = query.split('&').associate {
+                        val parts = it.split('=', limit = 2)
+                        parts[0] to (if (parts.size > 1) java.net.URLDecoder.decode(parts[1], "UTF-8") else "")
+                    }
+                    val topic = params["topic"] ?: return null
+                    val key = params["key"] ?: return null
+                    val token = params["token"] ?: ""
+                    val port = params["port"]?.toIntOrNull() ?: 8443
+                    return BunkerConfig(ntfyTopic = topic, encryptionKeyBase64 = key, token = token, port = port)
+                } catch (_: Exception) {
+                    return null
+                }
+            }
             else -> return null
         }
 

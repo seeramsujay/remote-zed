@@ -69,6 +69,7 @@ internal fun ZedAppContent(
     scanning: Boolean = false,
     scannerFeedback: String? = null,
     onScanQr: () -> Unit = {},
+    onPastePairing: (String) -> Unit = {},
     stayConnected: Boolean = true,
     onStayConnectedChange: (Boolean) -> Unit = {},
     allowScreenshots: Boolean = false,
@@ -121,6 +122,7 @@ internal fun ZedAppContent(
                             scanning = scanning,
                             scannerFeedback = scannerFeedback ?: state.notice,
                             onScanQr = onScanQr,
+                            onPastePairing = onPastePairing,
                         )
 
                         Page.PROJECTS -> HomeScreen(state = state, vm = vm)

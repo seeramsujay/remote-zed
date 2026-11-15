@@ -124,6 +124,10 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     },
+                    onPastePairing = { payload ->
+                        scannerFeedback = "Pairing with provided ticket…"
+                        vm.pairQr(payload, phoneLabel())
+                    },
                 )
             }
         }
@@ -177,6 +181,7 @@ fun ZedApp(
     scannerFeedback: String? = null,
     onNotificationPermissionNeeded: () -> Unit = {},
     onScanQr: () -> Unit = {},
+    onPastePairing: (String) -> Unit = {},
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -281,6 +286,7 @@ fun ZedApp(
             scanning = scanning,
             scannerFeedback = scannerFeedback,
             onScanQr = onScanQr,
+            onPastePairing = onPastePairing,
             stayConnected = stayConnected ?: true,
             onStayConnectedChange = { enabled ->
                 settingsScope.launch {

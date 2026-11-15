@@ -158,15 +158,19 @@ class AndroidCredentialStore(context: Context) : CredentialStore {
         addProperty("origin", credential.origin)
         addProperty("device_id", credential.deviceId)
         addProperty("credential", credential.credential)
+        credential.bunkerTopic?.let { addProperty("bunker_topic", it) }
+        credential.bunkerKey?.let { addProperty("bunker_key", it) }
     }.toString().toByteArray(StandardCharsets.UTF_8)
 
     private fun decodeCredential(value: ByteArray): DeviceCredential {
         val objectValue = JsonParser.parseString(String(value, StandardCharsets.UTF_8)).asJsonObject
-        require(objectValue.keySet() == CREDENTIAL_FIELDS) { "Stored pairing fields are invalid." }
+        require(objectValue.keySet().containsAll(CREDENTIAL_FIELDS)) { "Stored pairing fields are invalid." }
         return DeviceCredential(
             origin = objectValue.requiredString("origin"),
             deviceId = objectValue.requiredString("device_id"),
             credential = objectValue.requiredString("credential"),
+            bunkerTopic = objectValue.get("bunker_topic")?.takeIf { it.isJsonPrimitive }?.asString,
+            bunkerKey = objectValue.get("bunker_key")?.takeIf { it.isJsonPrimitive }?.asString,
         )
     }
 
