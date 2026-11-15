@@ -58,10 +58,11 @@ fn is_binary_available(name: &str) -> bool {
             }
         }
     }
+    let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
     let standard_dirs = [
-        dirs::home_dir().map(|h| h.join(".local/bin")),
-        dirs::home_dir().map(|h| h.join(".cargo/bin")),
-        dirs::home_dir().map(|h| h.join(".npm-global/bin")),
+        home.as_ref().map(|h| h.join(".local/bin")),
+        home.as_ref().map(|h| h.join(".cargo/bin")),
+        home.as_ref().map(|h| h.join(".npm-global/bin")),
         Some(std::path::PathBuf::from("/usr/local/bin")),
         Some(std::path::PathBuf::from("/usr/bin")),
     ];
@@ -84,6 +85,8 @@ pub struct CustomThread {
     #[serde(default = "default_mode")]
     pub mode: String,
     #[serde(default)]
+    pub active_session_id: Option<String>,
+    #[serde(default)]
     pub messages: Vec<serde_json::Value>,
     #[serde(default)]
     pub transcript: Vec<serde_json::Value>,
@@ -93,6 +96,7 @@ pub struct CustomThread {
 #[derive(Clone, Debug)]
 pub struct ThreadState {
     pub current_mode: String,
+    pub active_session_id: Option<String>,
     pub messages: Vec<serde_json::Value>,
     pub transcript: Vec<serde_json::Value>,
     pub custom_threads: Vec<CustomThread>,
@@ -102,6 +106,7 @@ impl Default for ThreadState {
     fn default() -> Self {
         Self {
             current_mode: "yolo".to_string(),
+            active_session_id: None,
             messages: Vec::new(),
             transcript: Vec::new(),
             custom_threads: Vec::new(),
@@ -732,6 +737,7 @@ impl WebSocketGateway {
                     status: "ready".to_string(),
                     agent_id: agent_id.clone(),
                     mode: "yolo".to_string(),
+                    active_session_id: None,
                     messages: Vec::new(),
                     transcript: Vec::new(),
                 };
@@ -782,12 +788,12 @@ impl WebSocketGateway {
                         ct.mode = mode_id.clone();
                     }
                     let (agent_id, agent_name, mode) = if req_thread_id == "main-thread" {
-                        ("antigravity", "AntiGravity Agent", state.current_mode.clone())
+                        ("antigravity".to_string(), "AntiGravity Agent".to_string(), state.current_mode.clone())
                     } else if let Some(ct) = state.custom_threads.iter().find(|t| t.id == req_thread_id) {
                         let name = if ct.agent_id == "pi" { "Pi Agent" } else { "AntiGravity Agent" };
-                        (ct.agent_id.as_str(), name, ct.mode.clone())
+                        (ct.agent_id.clone(), name.to_string(), ct.mode.clone())
                     } else {
-                        ("antigravity", "AntiGravity Agent", "yolo".to_string())
+                        ("antigravity".to_string(), "AntiGravity Agent".to_string(), "yolo".to_string())
                     };
                     drop(state);
                     (200, serde_json::json!({
@@ -823,12 +829,12 @@ impl WebSocketGateway {
                 } else {
                     let state = thread_state.lock().await;
                     let (agent_id, agent_name, mode) = if req_thread_id == "main-thread" {
-                        ("antigravity", "AntiGravity Agent", state.current_mode.clone())
+                        ("antigravity".to_string(), "AntiGravity Agent".to_string(), state.current_mode.clone())
                     } else if let Some(ct) = state.custom_threads.iter().find(|t| t.id == req_thread_id) {
                         let name = if ct.agent_id == "pi" { "Pi Agent" } else { "AntiGravity Agent" };
-                        (ct.agent_id.as_str(), name, ct.mode.clone())
+                        (ct.agent_id.clone(), name.to_string(), ct.mode.clone())
                     } else {
-                        ("antigravity", "AntiGravity Agent", state.current_mode.clone())
+                        ("antigravity".to_string(), "AntiGravity Agent".to_string(), state.current_mode.clone())
                     };
                     drop(state);
                     (200, serde_json::json!({
@@ -878,6 +884,22 @@ impl WebSocketGateway {
                 if !text.is_empty() {
                     let agent_id = {
                         let mut state = thread_state.lock().await;
+                        if req_thread_id == "main-thread" {
+                            if state.messages.is_empty() {
+                                let recovered = session_manager.get_chat_messages(state.active_session_id.as_deref()).await;
+                                if !recovered.is_empty() {
+                                    state.messages = recovered;
+                                }
+                            }
+                        } else if let Some(ct) = state.custom_threads.iter_mut().find(|t| t.id == req_thread_id) {
+                            if ct.messages.is_empty() {
+                                let recovered = session_manager.get_chat_messages(ct.active_session_id.as_deref()).await;
+                                if !recovered.is_empty() {
+                                    ct.messages = recovered;
+                                }
+                            }
+                        }
+
                         let user_msg = serde_json::json!({ "role": "user", "text": text });
                         let user_transcript = serde_json::json!({
                             "kind": "user_message",
@@ -995,13 +1017,18 @@ impl WebSocketGateway {
                 }))
             } else if (path.starts_with("/v2/threads/") || path.starts_with("/threads/")) && method == "GET" {
                 let thread_id = path.rsplit('/').next().unwrap_or("main-thread");
-                let state = thread_state.lock().await;
+                let mut state = thread_state.lock().await;
                 let approvals = router.get_pending_approvals().await;
                 if thread_id == "main-thread" {
-                    let mut messages = state.messages.clone();
-                    if messages.is_empty() {
-                        messages = session_manager.get_chat_messages(None).await;
+                    if state.messages.is_empty() {
+                        let recovered = session_manager.get_chat_messages(state.active_session_id.as_deref()).await;
+                        if !recovered.is_empty() {
+                            state.messages = recovered;
+                        }
                     }
+                    let messages = state.messages.clone();
+                    let transcript = state.transcript.clone();
+                    drop(state);
                     (200, serde_json::json!({
                         "id": "main-thread",
                         "title": "AntiGravity AI Workspace",
@@ -1012,27 +1039,41 @@ impl WebSocketGateway {
                             "is_native": false
                         },
                         "messages": messages,
-                        "transcript": state.transcript,
+                        "transcript": transcript,
                         "approvals": approvals,
                         "elicitations": []
                     }))
-                } else if let Some(ct) = state.custom_threads.iter().find(|t| t.id == thread_id) {
+                } else if let Some(ct) = state.custom_threads.iter_mut().find(|t| t.id == thread_id) {
                     let agent_name = if ct.agent_id == "pi" { "Pi Agent" } else { "AntiGravity Agent" };
+                    if ct.messages.is_empty() {
+                        let recovered = session_manager.get_chat_messages(ct.active_session_id.as_deref()).await;
+                        if !recovered.is_empty() {
+                            ct.messages = recovered;
+                        }
+                    }
+                    let ct_id = ct.id.clone();
+                    let title = ct.title.clone();
+                    let status = ct.status.clone();
+                    let agent_id = ct.agent_id.clone();
+                    let messages = ct.messages.clone();
+                    let transcript = ct.transcript.clone();
+                    drop(state);
                     (200, serde_json::json!({
-                        "id": ct.id,
-                        "title": ct.title,
-                        "status": ct.status,
+                        "id": ct_id,
+                        "title": title,
+                        "status": status,
                         "agent": {
-                            "id": ct.agent_id,
+                            "id": agent_id,
                             "name": agent_name,
                             "is_native": false
                         },
-                        "messages": ct.messages,
-                        "transcript": ct.transcript,
+                        "messages": messages,
+                        "transcript": transcript,
                         "approvals": approvals,
                         "elicitations": []
                     }))
                 } else {
+                    drop(state);
                     (200, serde_json::json!({
                         "id": thread_id,
                         "title": "New Conversation",

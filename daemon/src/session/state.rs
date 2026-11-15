@@ -176,14 +176,20 @@ impl SessionManager {
 
                 let p = frame.get("params").and_then(|p| p.get("prompt"));
                 let user_text = if let Some(arr) = p.and_then(|p| p.as_array()) {
-                    arr.first()
-                        .and_then(|item| item.get("text"))
-                        .and_then(|t| t.as_str())
-                        .unwrap_or("")
+                    let mut parts = Vec::new();
+                    for item in arr {
+                        if let Some(t) = item.get("text").and_then(|t| t.as_str()) {
+                            let trimmed = t.trim();
+                            if !trimmed.is_empty() {
+                                parts.push(trimmed);
+                            }
+                        }
+                    }
+                    parts.join("\n")
                 } else if let Some(s) = p.and_then(|p| p.as_str()) {
-                    s
+                    s.to_string()
                 } else {
-                    ""
+                    String::new()
                 };
 
                 let clean_user = user_text.trim();

@@ -359,10 +359,16 @@ fun GitScreen(
                     unstaged = unstagedFiles,
                     commitMessage = commitMessage,
                     onCommitMessageChange = { commitMessage = it },
-                    onStageFile = { path -> vm.stageGit(path) },
-                    onUnstageFile = { path -> vm.unstageGit(path) },
-                    onStageAll = { unstagedFiles.forEach { vm.stageGit(it.path) } },
-                    onUnstageAll = { stagedFiles.forEach { vm.unstageGit(it.path) } },
+                    onStageFile = { path -> vm.stageGit(listOf(path)) },
+                    onUnstageFile = { path -> vm.unstageGit(listOf(path)) },
+                    onStageAll = {
+                        val paths = unstagedFiles.map { it.path }
+                        if (paths.isNotEmpty()) vm.stageGit(paths)
+                    },
+                    onUnstageAll = {
+                        val paths = stagedFiles.map { it.path }
+                        if (paths.isNotEmpty()) vm.unstageGit(paths)
+                    },
                     onCommit = {
                         if (commitMessage.isNotBlank()) {
                             vm.commitGit(commitMessage, stageAll = false)

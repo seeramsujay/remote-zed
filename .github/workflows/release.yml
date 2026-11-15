@@ -49,84 +49,6 @@ jobs:
           name: zed-remote-apk
           path: dist/zed-remote.apk
 
-  build-flutter-android:
-    name: Build Flutter Android APK
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-          cache: true
-
-      - name: Generate Flutter Android platform & configure release signing
-        run: |
-          cd app
-          flutter create --org dev.zed.mobile --platforms=android .
-          cd ..
-          python3 tools/configure-flutter-android.py
-          head -n 60 app/android/app/build.gradle.kts || true
-          cd app
-          flutter pub get
-          flutter build apk --release
-
-      - name: Prepare Flutter APK artifact
-        run: |
-          mkdir -p dist
-          APK_FILE=$(find app/build/app/outputs/flutter-apk -name "*.apk" | head -n 1)
-          cp "$APK_FILE" dist/zed-remote-flutter.apk
-
-      - name: Upload Flutter APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: zed-remote-flutter-apk
-          path: dist/zed-remote-flutter.apk
-
-  build-flutter-ios:
-    name: Build Flutter iOS App (Unsigned IPA)
-    runs-on: macos-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-          cache: true
-
-      - name: Generate Flutter iOS platform & configure permissions
-        run: |
-          cd app
-          flutter create --org dev.zed.mobile --platforms=ios .
-          plutil -insert NSCameraUsageDescription -string "Scan QR code to pair with desktop Zed" ios/Runner/Info.plist || true
-          plutil -insert NSLocalNetworkUsageDescription -string "Connect to Zed Remote daemon on local network" ios/Runner/Info.plist || true
-          flutter pub get
-          flutter build ios --release --no-codesign
-
-      - name: Package Unsigned IPA
-        run: |
-          mkdir -p dist/Payload
-          cp -r app/build/ios/iphoneos/Runner.app dist/Payload/
-          cd dist
-          zip -r zed-remote-ios-unsigned.ipa Payload
-          rm -rf Payload
-
-      - name: Upload iOS IPA
-        uses: actions/upload-artifact@v4
-        with:
-          name: zed-remote-ios-ipa
-          path: dist/zed-remote-ios-unsigned.ipa
-
   build-daemon:
     name: Build Host Daemon (Linux x86_64)
     runs-on: ubuntu-latest
@@ -165,7 +87,7 @@ jobs:
 
   publish-release:
     name: Publish GitHub Release
-    needs: [build-android, build-flutter-android, build-flutter-ios, build-daemon]
+    needs: [build-android, build-daemon]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -175,18 +97,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: zed-remote-apk
-          path: release-artifacts
-
-      - name: Download Flutter Android APK
-        uses: actions/download-artifact@v4
-        with:
-          name: zed-remote-flutter-apk
-          path: release-artifacts
-
-      - name: Download Flutter iOS IPA
-        uses: actions/download-artifact@v4
-        with:
-          name: zed-remote-ios-ipa
           path: release-artifacts
 
       - name: Download Linux Daemon
@@ -219,8 +129,6 @@ jobs:
           generate_release_notes: true
           files: |
             release-artifacts/zed-remote.apk
-            release-artifacts/zed-remote-flutter.apk
-            release-artifacts/zed-remote-ios-unsigned.ipa
             release-artifacts/zed-remote-daemon-linux-x86_64.tar.gz
             release-artifacts/bunker-tunnel.sh
             release-artifacts/inject-daemon.sh
