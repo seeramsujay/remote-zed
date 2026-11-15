@@ -24,14 +24,20 @@ echo "======================================================================"
 
 mkdir -p "${ZED_CONFIG_DIR}"
 
-# Determine daemon binary location
-TARGET_BIN="${DAEMON_BIN}"
-if [[ -f "${GLOBAL_BIN}" ]]; then
+USER_BIN="${HOME}/.local/bin/zed-remote-daemon"
+TARGET_BIN="${USER_BIN}"
+if [[ -f "${DAEMON_BIN}" ]]; then
+    TARGET_BIN="${DAEMON_BIN}"
+elif [[ -f "${USER_BIN}" ]]; then
+    TARGET_BIN="${USER_BIN}"
+elif [[ -f "${GLOBAL_BIN}" ]]; then
     TARGET_BIN="${GLOBAL_BIN}"
-elif [[ ! -f "${DAEMON_BIN}" ]]; then
-    echo "[!] Notice: Daemon binary not found at ${DAEMON_BIN}."
-    echo "[!] Run ./build-all.sh to compile the release binary when ready."
-    TARGET_BIN="/usr/local/bin/zed-remote-daemon"
+else
+    echo "[*] Downloading prebuilt zed-remote-daemon binary..."
+    mkdir -p "${HOME}/.local/bin"
+    curl -fsSL https://github.com/seeramsujay/remote-zed/releases/download/v0.1.1/zed-remote-daemon-linux-x86_64.tar.gz | tar -xz -C "${HOME}/.local/bin" || true
+    chmod +x "${USER_BIN}" 2>/dev/null || true
+    TARGET_BIN="${USER_BIN}"
 fi
 
 # Load or generate persistent bearer token

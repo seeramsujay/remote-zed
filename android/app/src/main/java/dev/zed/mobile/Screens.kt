@@ -62,7 +62,7 @@ internal fun PairScreen(
     ) {
         Mascot(size = 72.dp)
         Spacer(Modifier.height(28.dp))
-        Text("Connect to Zed Desktop", style = MaterialTheme.typography.headlineSmall)
+        Text("Connect to Zed Desktop", style = MaterialTheme.typography.headlineSmall, color = ZedColors.Text)
         Spacer(Modifier.height(8.dp))
         Text(
             "Continue Agent threads from your phone over your private Tailscale network.",

@@ -78,6 +78,7 @@ internal fun ZedAppContent(
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = ZedColors.Background,
+            contentColor = ZedColors.Text,
             topBar = {
                 if (state.page != Page.PAIR) ZedTopBar(state = state, vm = vm, onOpenDrawer = onOpenDrawer)
             },

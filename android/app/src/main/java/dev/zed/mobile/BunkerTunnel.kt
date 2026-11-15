@@ -71,7 +71,7 @@ object BunkerTunnel {
      */
     suspend fun resolveTunnelUrl(config: BunkerConfig, client: OkHttpClient = OkHttpClient()): String =
         withContext(Dispatchers.IO) {
-            val ntfyUrl = "https://ntfy.sh/${config.ntfyTopic}/raw"
+            val ntfyUrl = "https://ntfy.sh/${config.ntfyTopic}/raw?poll=1"
             val request = Request.Builder()
                 .url(ntfyUrl)
                 .header("User-Agent", "ZedRemote-Android/2.0")
@@ -79,16 +79,21 @@ object BunkerTunnel {
 
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
-                throw IllegalStateException("Bunker rendezvous fetch failed: HTTP ${response.code}")
+                throw GatewayException("Bunker rendezvous fetch failed: HTTP ${response.code}")
             }
 
             val body = response.body?.string()?.trim()
-                ?: throw IllegalStateException("Empty bunker payload received from rendezvous.")
+                ?: throw GatewayException("Empty bunker payload received from rendezvous. Ensure zed-tunnel is running on your desktop.")
 
-            // Decrypt the AES-256-GCM payload
-            val decrypted = decryptAesGcm(body, config.encryptionKeyBase64)
+            val latestPayload = body.lines().map { it.trim() }.filter { it.isNotBlank() }.lastOrNull()
+                ?: throw GatewayException("No tunnel payload found in rendezvous. Run zed-tunnel on your desktop.")
 
-            // Normalize decrypted address to http / https origin
+            val decrypted = try {
+                decryptAesGcm(latestPayload, config.encryptionKeyBase64)
+            } catch (e: Exception) {
+                throw GatewayException("Failed to decrypt rendezvous endpoint: ${e.message}")
+            }
+
             normalizeOrigin(decrypted, config.port)
         }
 

@@ -70,6 +70,14 @@ fi
 chmod +x "${INSTALL_ROOT}/tools/"*.sh
 echo -e "${GREEN}[✓] Files installed successfully.${NC}\n"
 
+# Download prebuilt daemon binary if not present
+mkdir -p "${HOME}/.local/bin"
+if [[ ! -f "${HOME}/.local/bin/zed-remote-daemon" ]]; then
+    echo -e "${BLUE}[*] Fetching prebuilt zed-remote-daemon release binary...${NC}"
+    curl -fsSL https://github.com/seeramsujay/remote-zed/releases/download/v0.1.1/zed-remote-daemon-linux-x86_64.tar.gz | tar -xz -C "${HOME}/.local/bin" || true
+    chmod +x "${HOME}/.local/bin/zed-remote-daemon" 2>/dev/null || true
+fi
+
 # 3. Inject into Zed settings.json
 echo -e "${BLUE}${BOLD}[*] Step 3/6: Injecting daemon into official Zed settings...${NC}"
 "${INSTALL_ROOT}/tools/inject-daemon.sh"

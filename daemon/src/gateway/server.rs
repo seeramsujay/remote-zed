@@ -537,7 +537,13 @@ impl WebSocketGateway {
         }
 
         let (status_code, json_resp) = if path == "/v2/status" || path == "/status" {
-            (200, serde_json::json!({ "status": "ok", "version": "2.0.0", "gateway": "zed-remote-daemon" }))
+            (200, serde_json::json!({
+                "status": "ok",
+                "api_version": 2,
+                "name": "Zed-Desktop",
+                "version": "2.0.0",
+                "gateway": "zed-remote-daemon"
+            }))
         } else if path == "/v2/pair/claim" && method == "POST" {
             (200, serde_json::json!({
                 "device_id": "bunker-phone",
@@ -551,21 +557,55 @@ impl WebSocketGateway {
                 return Ok(());
             }
 
-            match (method, path) {
-                ("GET", "/v2/projects/catalog") | ("GET", "/v2/projects") => {
-                    let cwd = terminal.get_cwd().await;
-                    let name = std::path::Path::new(&cwd)
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "workspace".to_string());
-                    (200, serde_json::json!([{
+            if path == "/v2/projects/catalog" || path == "/v2/projects" {
+                let cwd = terminal.get_cwd().await;
+                let name = std::path::Path::new(&cwd)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "workspace".to_string());
+                (200, serde_json::json!({
+                    "projects": [{
                         "id": "current-project",
                         "name": name,
                         "path": cwd,
-                        "isOpen": true,
+                        "is_open": true,
                         "kind": "local"
-                    }]))
-                }
+                    }]
+                }))
+            } else if path.ends_with("/threads") && method == "GET" {
+                (200, serde_json::json!({
+                    "threads": [{
+                        "id": "main-thread",
+                        "title": "AntiGravity AI Workspace",
+                        "status": "ready"
+                    }]
+                }))
+            } else if path.ends_with("/agents") && method == "GET" {
+                (200, serde_json::json!({
+                    "agents": [{
+                        "id": "antigravity",
+                        "name": "AntiGravity Agent",
+                        "is_native": false
+                    }]
+                }))
+            } else if path.contains("/threads/") && path.ends_with("/changes") && method == "GET" {
+                (200, serde_json::json!({
+                    "files": []
+                }))
+            } else if path.contains("/threads/") && method == "GET" {
+                (200, serde_json::json!({
+                    "id": "main-thread",
+                    "title": "AntiGravity AI Workspace",
+                    "status": "ready",
+                    "messages": [],
+                    "transcript": []
+                }))
+            } else if method == "POST" && (path.ends_with("/messages") || path.ends_with("/cancel")) {
+                (200, serde_json::json!({
+                    "accepted": true
+                }))
+            } else {
+                match (method, path) {
                 ("POST", "/v2/terminal/exec") => {
                     let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
                     let cmd = body_json.get("command").and_then(|v| v.as_str()).unwrap_or("");
@@ -619,6 +659,7 @@ impl WebSocketGateway {
                     return Ok(());
                 }
                 _ => (404, serde_json::json!({ "error": "not found" })),
+                }
             }
         };
 

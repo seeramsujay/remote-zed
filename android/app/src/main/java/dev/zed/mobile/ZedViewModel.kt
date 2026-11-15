@@ -1775,7 +1775,7 @@ class ZedViewModel(
 
     private fun message(e: Exception) = when (e) {
         is GatewayException, is CredentialStoreException, is IllegalArgumentException -> e.message ?: "Request failed."
-        else -> "Unexpected response. Refresh or reconnect to the desktop."
+        else -> e.message ?: "Unexpected response. Refresh or reconnect to the desktop."
     }
 
     private companion object {
