@@ -27,6 +27,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -75,13 +77,19 @@ internal fun ZedAppContent(
     allowScreenshots: Boolean = false,
     onAllowScreenshotsChange: (Boolean) -> Unit = {},
     onOpenDrawer: () -> Unit = {},
+    onOpenGitDrawer: () -> Unit = {},
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = ZedColors.Background,
             contentColor = ZedColors.Text,
             topBar = {
-                if (state.page != Page.PAIR) ZedTopBar(state = state, vm = vm, onOpenDrawer = onOpenDrawer)
+                if (state.page != Page.PAIR) ZedTopBar(
+                    state = state,
+                    vm = vm,
+                    onOpenDrawer = onOpenDrawer,
+                    onOpenGitDrawer = onOpenGitDrawer,
+                )
             },
             floatingActionButton = {
                 if (state.page == Page.PROJECTS && !state.gatewayUnavailable && state.projects.any { it.isOpen }) {
@@ -143,10 +151,11 @@ internal fun ZedAppContent(
                         )
 
                         Page.FILES -> FilesScreen(
-                            initialPath = state.hostWorkspace ?: "/home",
+                            initialPath = state.hostWorkspace ?: state.projects.firstOrNull()?.path ?: "~/Projects",
                             onListDirectory = { path -> vm.listDirectory(path) },
                             onCreateFolder = { path -> vm.createFolder(path) },
                             onSetWorkspace = { path -> vm.setWorkspace(path) },
+                            onTrustDirectory = { path -> vm.trustWorkspace(path) },
                         )
                     }
                 }
@@ -235,7 +244,12 @@ private fun PullToRefreshPage(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ZedTopBar(state: MobileState, vm: ZedViewModel, onOpenDrawer: () -> Unit) {
+private fun ZedTopBar(
+    state: MobileState,
+    vm: ZedViewModel,
+    onOpenDrawer: () -> Unit,
+    onOpenGitDrawer: () -> Unit = {},
+) {
     val colors = TopAppBarDefaults.topAppBarColors(
         containerColor = ZedColors.Background,
         scrolledContainerColor = ZedColors.Background,
@@ -304,6 +318,37 @@ private fun ZedTopBar(state: MobileState, vm: ZedViewModel, onOpenDrawer: () -> 
                 }
             },
             navigationIcon = back,
+            actions = {
+                IconButton(onClick = onOpenGitDrawer) {
+                    Icon(
+                        imageVector = Icons.Default.AccountTree,
+                        contentDescription = "Open Git Panel",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            },
+            colors = colors,
+        )
+
+        Page.CHANGES -> CenterAlignedTopAppBar(
+            title = {
+                Text(
+                    "Changes",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                )
+            },
+            navigationIcon = back,
+            actions = {
+                IconButton(onClick = onOpenGitDrawer) {
+                    Icon(
+                        imageVector = Icons.Default.AccountTree,
+                        contentDescription = "Open Git Panel",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            },
             colors = colors,
         )
 
@@ -311,7 +356,6 @@ private fun ZedTopBar(state: MobileState, vm: ZedViewModel, onOpenDrawer: () -> 
             title = {
                 Text(
                     when (state.page) {
-                        Page.CHANGES -> "Changes"
                         Page.SETTINGS -> "Settings"
                         else -> "Zed"
                     },
@@ -358,12 +402,14 @@ internal fun MobileNavigationDrawer(
     state: MobileState,
     onDestination: (Page) -> Unit,
     onOpenRecent: (RecentThread) -> Unit,
+    onReconnect: () -> Unit = {},
 ) {
     ModalDrawerSheet(
         modifier = Modifier
             .width(304.dp)
             .fillMaxHeight(),
-        drawerContainerColor = ZedColors.Background,
+        drawerContainerColor = ZedColors.DarkSurface,
+        drawerContentColor = ZedColors.DarkText,
         drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -373,7 +419,7 @@ internal fun MobileNavigationDrawer(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Mascot(size = 30.dp)
-                Text("Zed", style = MaterialTheme.typography.headlineSmall)
+                Text("Zed", style = MaterialTheme.typography.headlineSmall, color = ZedColors.DarkText)
             }
             DrawerItem(Symbols.Projects, "Projects", state.page == Page.PROJECTS) { onDestination(Page.PROJECTS) }
             DrawerItem(Symbols.Folder, "Files", state.page == Page.FILES) { onDestination(Page.FILES) }
@@ -386,7 +432,7 @@ internal fun MobileNavigationDrawer(
                     "Recents",
                     modifier = Modifier.padding(start = 24.dp, bottom = 4.dp),
                     style = MaterialTheme.typography.labelMedium,
-                    color = ZedColors.Muted,
+                    color = ZedColors.DarkMuted,
                 )
             }
             LazyColumn(modifier = Modifier.weight(1f)) {
@@ -409,13 +455,14 @@ internal fun MobileNavigationDrawer(
                         Icon(
                             Symbols.ChatBubble,
                             contentDescription = null,
-                            tint = ZedColors.Muted,
+                            tint = ZedColors.DarkMuted,
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
                             recent.thread.title.ifBlank { "New thread" },
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodyMedium,
+                            color = ZedColors.DarkText,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -427,7 +474,13 @@ internal fun MobileNavigationDrawer(
                 }
             }
             Hairline()
-            ConnectionLine(state, modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp))
+            ConnectionLine(
+                state,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = state.gatewayUnavailable || state.host.isBlank()) { onReconnect() }
+                    .padding(horizontal = 24.dp, vertical = 16.dp)
+            )
         }
     }
 }
@@ -447,8 +500,8 @@ private fun DrawerItem(icon: ImageVector, label: String, selected: Boolean, onCl
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Icon(icon, contentDescription = null, tint = ZedColors.Text, modifier = Modifier.size(18.dp))
-        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Icon(icon, contentDescription = null, tint = ZedColors.DarkText, modifier = Modifier.size(18.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge, color = ZedColors.DarkText)
     }
 }
 
@@ -464,20 +517,20 @@ internal fun ConnectionLine(state: MobileState, modifier: Modifier = Modifier, s
         Icon(
             if (connected) Symbols.Laptop else Symbols.LaptopOff,
             contentDescription = null,
-            tint = if (connected) ZedColors.Success else ZedColors.Faint,
+            tint = if (connected) ZedColors.Success else ZedColors.DarkFaint,
             modifier = Modifier.size(18.dp),
         )
         Text(
-            if (connected) "Connected" else "Disconnected",
+            if (connected) "Connected" else "Disconnected (tap to reconnect)",
             style = MaterialTheme.typography.labelMedium,
-            color = if (connected) ZedColors.Success else ZedColors.Muted,
+            color = if (connected) ZedColors.Success else ZedColors.DarkMuted,
         )
         if (!showHost) return@Row
         Spacer(Modifier.width(2.dp))
         Text(
             desktopLabel(state.host),
             style = MaterialTheme.typography.bodySmall,
-            color = ZedColors.Faint,
+            color = ZedColors.DarkFaint,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

@@ -44,6 +44,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,10 +56,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -191,6 +194,7 @@ fun ZedApp(
     var allowScreenshots by remember(connectionSettings) { mutableStateOf(false) }
     val activity = LocalContext.current as? Activity
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val gitDrawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val drawerScope = rememberCoroutineScope()
     val settingsScope = rememberCoroutineScope()
 
@@ -235,7 +239,7 @@ fun ZedApp(
     }
 
     BackHandler(
-        enabled = drawerState.isOpen || state.page in listOf(
+        enabled = drawerState.isOpen || gitDrawerState.isOpen || state.page in listOf(
             Page.CHAT,
             Page.CHANGES,
             Page.SETTINGS,
@@ -243,7 +247,9 @@ fun ZedApp(
             Page.FILES
         )
     ) {
-        if (drawerState.isOpen) {
+        if (gitDrawerState.isOpen) {
+            drawerScope.launch { gitDrawerState.close() }
+        } else if (drawerState.isOpen) {
             drawerScope.launch { drawerState.close() }
         } else {
             vm.back()
@@ -252,11 +258,8 @@ fun ZedApp(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = state.page != Page.PAIR,
+        gesturesEnabled = state.page != Page.PAIR && !gitDrawerState.isOpen,
         drawerContent = {
-            // Always compose the sheet: the drawer measures its closed offset from the sheet's
-            // width, so an empty sheet on the pairing page would leave it stuck open afterwards.
-            // Gestures are disabled and no menu button is shown while pairing.
             MobileNavigationDrawer(
                 state = state,
                 onDestination = { page ->
@@ -277,29 +280,49 @@ fun ZedApp(
                         vm.openThread(recent.thread, recent.project)
                     }
                 },
+                onReconnect = { vm.reconnect() },
             )
         },
     ) {
-        ZedAppContent(
-            state = state,
-            vm = vm,
-            scanning = scanning,
-            scannerFeedback = scannerFeedback,
-            onScanQr = onScanQr,
-            onPastePairing = onPastePairing,
-            stayConnected = stayConnected ?: true,
-            onStayConnectedChange = { enabled ->
-                settingsScope.launch {
-                    connectionSettings.setStayConnected(enabled)
-                    if (!enabled) GatewayEventService.stop(appContext)
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+            ModalNavigationDrawer(
+                drawerState = gitDrawerState,
+                gesturesEnabled = (state.page == Page.CHAT || state.page == Page.CHANGES) && !drawerState.isOpen,
+                drawerContent = {
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        GitPanelDrawer(
+                            state = state,
+                            vm = vm,
+                            onClose = { drawerScope.launch { gitDrawerState.close() } },
+                        )
+                    }
+                },
+            ) {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    ZedAppContent(
+                        state = state,
+                        vm = vm,
+                        scanning = scanning,
+                        scannerFeedback = scannerFeedback,
+                        onScanQr = onScanQr,
+                        onPastePairing = onPastePairing,
+                        stayConnected = stayConnected ?: true,
+                        onStayConnectedChange = { enabled ->
+                            settingsScope.launch {
+                                connectionSettings.setStayConnected(enabled)
+                                if (!enabled) GatewayEventService.stop(appContext)
+                            }
+                        },
+                        allowScreenshots = allowScreenshots,
+                        onAllowScreenshotsChange = { allowed ->
+                            settingsScope.launch { connectionSettings.setAllowScreenshots(allowed) }
+                        },
+                        onOpenDrawer = { drawerScope.launch { drawerState.open() } },
+                        onOpenGitDrawer = { drawerScope.launch { gitDrawerState.open() } },
+                    )
                 }
-            },
-            allowScreenshots = allowScreenshots,
-            onAllowScreenshotsChange = { allowed ->
-                settingsScope.launch { connectionSettings.setAllowScreenshots(allowed) }
-            },
-            onOpenDrawer = { drawerScope.launch { drawerState.open() } },
-        )
+            }
+        }
     }
 }
 

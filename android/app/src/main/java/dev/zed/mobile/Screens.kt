@@ -332,7 +332,7 @@ internal fun quietSwitchColors() = SwitchDefaults.colors(
 internal fun HomeScreen(state: MobileState, vm: ZedViewModel) {
     val recents = state.recents.take(4)
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 4.dp, bottom = 120.dp)) {
-        item(key = "desktop") { DesktopCard(state, onReconnect = vm::refresh) }
+        item(key = "desktop") { DesktopCard(state, onReconnect = vm::reconnect) }
         state.notice?.let { notice -> item(key = "notice") { InlineNotice(notice) } }
         if (recents.isNotEmpty()) {
             item(key = "recents-label") { HomeSectionLabel("Recents") }

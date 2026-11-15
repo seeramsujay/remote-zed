@@ -5,10 +5,12 @@ use crate::gateway::auth::AuthValidator;
 use crate::git::GitEngine;
 use crate::protocol::{error_codes, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse, RequestId};
 use crate::proxy::MessageRouter;
+use crate::security::SecurityGuard;
 use crate::session::SessionManager;
 use crate::telemetry::{PowerAction, TelemetryCollector};
 use crate::terminal::TerminalManager;
 use futures_util::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -18,12 +20,43 @@ use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 
+fn percent_decode(s: &str) -> String {
+    let mut bytes = Vec::new();
+    let mut chars = s.bytes();
+    while let Some(b) = chars.next() {
+        if b == b'%' {
+            let h1 = chars.next();
+            let h2 = chars.next();
+            if let (Some(c1), Some(c2)) = (h1, h2) {
+                if let Ok(byte) = u8::from_str_radix(&format!("{}{}", c1 as char, c2 as char), 16) {
+                    bytes.push(byte);
+                    continue;
+                }
+            }
+        } else if b == b'+' {
+            bytes.push(b' ');
+            continue;
+        }
+        bytes.push(b);
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// A custom user thread representation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CustomThread {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+}
+
 /// State of an active thread for v2 mobile clients.
 #[derive(Clone, Debug)]
 pub struct ThreadState {
     pub current_mode: String,
     pub messages: Vec<serde_json::Value>,
     pub transcript: Vec<serde_json::Value>,
+    pub custom_threads: Vec<CustomThread>,
 }
 
 impl Default for ThreadState {
@@ -32,6 +65,7 @@ impl Default for ThreadState {
             current_mode: "yolo".to_string(),
             messages: Vec::new(),
             transcript: Vec::new(),
+            custom_threads: Vec::new(),
         }
     }
 }
@@ -45,6 +79,7 @@ pub struct WebSocketGateway {
     git: GitEngine,
     telemetry: Arc<TelemetryCollector>,
     terminal: Arc<TerminalManager>,
+    security: SecurityGuard,
     thread_state: Arc<tokio::sync::Mutex<ThreadState>>,
 }
 
@@ -58,6 +93,7 @@ impl WebSocketGateway {
         git: GitEngine,
         telemetry: Arc<TelemetryCollector>,
         terminal: Arc<TerminalManager>,
+        security: SecurityGuard,
     ) -> Self {
         Self {
             bind_addr,
@@ -67,6 +103,7 @@ impl WebSocketGateway {
             git,
             telemetry,
             terminal,
+            security,
             thread_state: Arc::new(tokio::sync::Mutex::new(ThreadState::default())),
         }
     }
@@ -86,6 +123,7 @@ impl WebSocketGateway {
                     let git = self.git.clone();
                     let telemetry = Arc::clone(&self.telemetry);
                     let terminal = Arc::clone(&self.terminal);
+                    let security = self.security.clone();
                     let thread_state = Arc::clone(&self.thread_state);
 
                     tokio::spawn(async move {
@@ -98,6 +136,7 @@ impl WebSocketGateway {
                             git,
                             telemetry,
                             terminal,
+                            security,
                             thread_state,
                         )
                         .await
@@ -123,6 +162,7 @@ impl WebSocketGateway {
         git: GitEngine,
         telemetry: Arc<TelemetryCollector>,
         terminal: Arc<TerminalManager>,
+        security: SecurityGuard,
         thread_state: Arc<tokio::sync::Mutex<ThreadState>>,
     ) -> Result<()> {
         // Detect standard HTTP REST requests vs WebSocket upgrades
@@ -143,6 +183,7 @@ impl WebSocketGateway {
                 auth,
                 terminal,
                 git,
+                security,
                 session_manager,
                 router,
                 thread_state,
@@ -517,7 +558,8 @@ impl WebSocketGateway {
         peer_addr: SocketAddr,
         auth: AuthValidator,
         terminal: Arc<TerminalManager>,
-        _git: GitEngine,
+        git: GitEngine,
+        security: SecurityGuard,
         session_manager: SessionManager,
         router: MessageRouter,
         thread_state: Arc<tokio::sync::Mutex<ThreadState>>,
@@ -611,12 +653,33 @@ impl WebSocketGateway {
                     }]
                 }))
             } else if path.ends_with("/threads") && method == "GET" {
+                let state = thread_state.lock().await;
+                let mut threads_list = vec![serde_json::json!({
+                    "id": "main-thread",
+                    "title": "AntiGravity AI Workspace",
+                    "status": "ready"
+                })];
+                for ct in &state.custom_threads {
+                    threads_list.push(serde_json::json!({
+                        "id": ct.id,
+                        "title": ct.title,
+                        "status": ct.status
+                    }));
+                }
+                (200, serde_json::json!({ "threads": threads_list }))
+            } else if (path == "/v2/threads" || path.ends_with("/threads")) && method == "POST" {
+                let thread_id = format!("thread-{}", chrono::Utc::now().timestamp_millis());
+                let title = "New Conversation".to_string();
+                let mut state = thread_state.lock().await;
+                state.custom_threads.push(CustomThread {
+                    id: thread_id.clone(),
+                    title: title.clone(),
+                    status: "ready".to_string(),
+                });
                 (200, serde_json::json!({
-                    "threads": [{
-                        "id": "main-thread",
-                        "title": "AntiGravity AI Workspace",
-                        "status": "ready"
-                    }]
+                    "id": thread_id,
+                    "title": title,
+                    "status": "ready"
                 }))
             } else if path.ends_with("/agents") && method == "GET" {
                 (200, serde_json::json!({
@@ -782,21 +845,40 @@ impl WebSocketGateway {
                     "accepted": true
                 }))
             } else if (path.starts_with("/v2/threads/") || path.starts_with("/threads/")) && method == "GET" {
+                let thread_id = path.rsplit('/').next().unwrap_or("main-thread");
                 let state = thread_state.lock().await;
                 let approvals = router.get_pending_approvals().await;
-                let mut messages = state.messages.clone();
-                if messages.is_empty() {
-                    messages = session_manager.get_chat_messages(None).await;
+                if thread_id == "main-thread" {
+                    let mut messages = state.messages.clone();
+                    if messages.is_empty() {
+                        messages = session_manager.get_chat_messages(None).await;
+                    }
+                    (200, serde_json::json!({
+                        "id": "main-thread",
+                        "title": "AntiGravity AI Workspace",
+                        "status": "ready",
+                        "messages": messages,
+                        "transcript": state.transcript,
+                        "approvals": approvals,
+                        "elicitations": []
+                    }))
+                } else {
+                    let title = state
+                        .custom_threads
+                        .iter()
+                        .find(|t| t.id == thread_id)
+                        .map(|t| t.title.as_str())
+                        .unwrap_or("New Conversation");
+                    (200, serde_json::json!({
+                        "id": thread_id,
+                        "title": title,
+                        "status": "ready",
+                        "messages": [],
+                        "transcript": [],
+                        "approvals": approvals,
+                        "elicitations": []
+                    }))
                 }
-                (200, serde_json::json!({
-                    "id": "main-thread",
-                    "title": "AntiGravity AI Workspace",
-                    "status": "ready",
-                    "messages": messages,
-                    "transcript": state.transcript,
-                    "approvals": approvals,
-                    "elicitations": []
-                }))
             } else {
                 match (method, path) {
                 ("POST", "/v2/terminal/exec") => {
@@ -811,11 +893,14 @@ impl WebSocketGateway {
                     let mut target_path = None;
                     for param in query.split('&') {
                         if let Some(val) = param.strip_prefix("path=") {
-                            target_path = Some(val);
+                            let decoded = percent_decode(val);
+                            if !decoded.trim().is_empty() {
+                                target_path = Some(decoded);
+                            }
                             break;
                         }
                     }
-                    match terminal.list_directory(target_path).await {
+                    match terminal.list_directory(target_path.as_deref()).await {
                         Ok(res) => (200, serde_json::to_value(res).unwrap_or_default()),
                         Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
                     }
@@ -835,6 +920,82 @@ impl WebSocketGateway {
                         Ok(p) => (200, serde_json::json!({ "workspace": p, "accepted": true })),
                         Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
                     }
+                }
+                ("POST", "/v2/workspace/trust") => {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let path_arg = body_json.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                    let expanded = if path_arg.starts_with('~') {
+                        if let Ok(home) = std::env::var("HOME") {
+                            path_arg.replacen('~', &home, 1)
+                        } else {
+                            path_arg.to_string()
+                        }
+                    } else {
+                        path_arg.to_string()
+                    };
+                    security.trust_path(std::path::PathBuf::from(&expanded)).await;
+                    (200, serde_json::json!({ "trusted": true, "path": expanded }))
+                }
+                ("GET", "/v2/git/status") => {
+                    match git.status().await {
+                        Ok(st) => (200, serde_json::to_value(st).unwrap_or_default()),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("POST", "/v2/git/stage") => {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let paths: Vec<String> = body_json
+                        .get("paths")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| arr.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+                        .unwrap_or_default();
+                    match git.stage(&paths).await {
+                        Ok(_) => (200, serde_json::json!({ "success": true })),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("POST", "/v2/git/unstage") => {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let paths: Vec<String> = body_json
+                        .get("paths")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| arr.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+                        .unwrap_or_default();
+                    match git.unstage(&paths).await {
+                        Ok(_) => (200, serde_json::json!({ "success": true })),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("POST", "/v2/git/commit") => {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let message = body_json.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                    let stage_all = body_json.get("stage_all").and_then(|v| v.as_bool()).unwrap_or(false);
+                    match git.commit(message, stage_all).await {
+                        Ok(res) => (200, serde_json::to_value(res).unwrap_or_default()),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("POST", "/v2/git/push") => {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let remote = body_json.get("remote").and_then(|v| v.as_str());
+                    let branch = body_json.get("branch").and_then(|v| v.as_str());
+                    match git.push(remote, branch).await {
+                        Ok(out) => (200, serde_json::json!({ "output": out })),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("GET", "/v2/git/branches") => {
+                    match git.branches().await {
+                        Ok(branches) => (200, serde_json::json!({ "branches": branches })),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("GET", "/v2/git/log") | ("GET", "/v2/git/graph") => {
+                    match git.log_graph(30).await {
+                        Ok(commits) => (200, serde_json::json!({ "commits": commits })),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
                 }
                 ("GET", "/v2/events") => {
                     let sse_header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: *\r\n\r\n";

@@ -44,6 +44,16 @@ pub struct GitCommitResult {
     pub summary: String,
 }
 
+/// Commit log entry representation for mobile git graph / log inspection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitCommitInfo {
+    pub hash: String,
+    pub author: String,
+    pub date: String,
+    pub decorations: String,
+    pub message: String,
+}
+
 /// Git operational engine executing asynchronous commands within the workspace root.
 #[derive(Clone, Debug)]
 pub struct GitEngine {
@@ -205,5 +215,63 @@ impl GitEngine {
         info!("Pushing branch {} to remote {}", target_branch, target_remote);
         let out = self.run_git(&["push", target_remote, target_branch]).await?;
         Ok(out)
+    }
+
+    /// Unstages specific files (`git restore --staged <paths>`).
+    pub async fn unstage(&self, paths: &[String]) -> Result<()> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+        let mut args = vec!["restore", "--staged", "--"];
+        let str_paths: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
+        args.extend(str_paths);
+
+        self.run_git(&args).await?;
+        info!("Unstaged {} files", paths.len());
+        Ok(())
+    }
+
+    /// Retrieves list of all local and remote branches.
+    pub async fn branches(&self) -> Result<Vec<String>> {
+        let out = self.run_git(&["branch", "-a", "--format=%(refname:short)"]).await?;
+        let mut list = Vec::new();
+        for line in out.lines() {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() && !list.contains(&trimmed.to_string()) {
+                list.push(trimmed.to_string());
+            }
+        }
+        Ok(list)
+    }
+
+    /// Retrieves recent commit history formatted for graphical display.
+    pub async fn log_graph(&self, limit: usize) -> Result<Vec<GitCommitInfo>> {
+        let limit_str = format!("-n{}", limit.max(1));
+        let out = self
+            .run_git(&["log", &limit_str, "--pretty=format:%h%x09%an%x09%ar%x09%d%x09%s"])
+            .await?;
+
+        let mut commits = Vec::new();
+        for line in out.lines() {
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() >= 5 {
+                commits.push(GitCommitInfo {
+                    hash: parts[0].to_string(),
+                    author: parts[1].to_string(),
+                    date: parts[2].to_string(),
+                    decorations: parts[3].trim().to_string(),
+                    message: parts[4].to_string(),
+                });
+            } else if !parts.is_empty() && !parts[0].is_empty() {
+                commits.push(GitCommitInfo {
+                    hash: parts[0].to_string(),
+                    author: String::new(),
+                    date: String::new(),
+                    decorations: String::new(),
+                    message: parts.get(1).copied().unwrap_or("").to_string(),
+                });
+            }
+        }
+        Ok(commits)
     }
 }

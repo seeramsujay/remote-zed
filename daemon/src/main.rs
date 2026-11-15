@@ -118,6 +118,7 @@ async fn main() -> anyhow::Result<()> {
         git,
         telemetry,
         terminal,
+        security.clone(),
     );
 
     tokio::spawn(async move {
