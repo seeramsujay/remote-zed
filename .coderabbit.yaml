@@ -1,0 +1,27 @@
+# CodeRabbit Configuration File
+# Schema: https://coderabbit.ai/integrations/schema.v2.json
+language: "en-US"
+early_access: false
+
+reviews:
+  profile: "assertive"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_pause_after_reviewed_commits: 0
+    base_branches:
+      - "main"
+      - "master"
+  tools:
+    shellcheck:
+      enabled: true
+    clippy:
+      enabled: false
+
+chat:
+  auto_reply: true
