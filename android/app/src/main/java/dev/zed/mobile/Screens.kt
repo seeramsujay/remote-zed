@@ -138,7 +138,7 @@ internal fun PairScreen(
                 textStyle = MaterialTheme.typography.bodySmall.copy(color = ZedColors.Text),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = ZedColors.Accent,
-                    unfocusedBorderColor = ZedColors.Border,
+                    unfocusedBorderColor = ZedColors.Hairline,
                     cursorColor = ZedColors.Accent,
                 ),
             )
