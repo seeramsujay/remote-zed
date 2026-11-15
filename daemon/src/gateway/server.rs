@@ -11,6 +11,7 @@ use crate::terminal::TerminalManager;
 use futures_util::{SinkExt, StreamExt};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::accept_hdr_async;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
@@ -92,7 +93,7 @@ impl WebSocketGateway {
 
     /// Performs the WebSocket handshake with authentication verification, then services client messages.
     async fn handle_connection(
-        stream: TcpStream,
+        mut stream: TcpStream,
         peer_addr: SocketAddr,
         auth: AuthValidator,
         router: MessageRouter,
@@ -101,6 +102,24 @@ impl WebSocketGateway {
         telemetry: Arc<TelemetryCollector>,
         terminal: Arc<TerminalManager>,
     ) -> Result<()> {
+        // Detect standard HTTP REST requests vs WebSocket upgrades
+        let mut peek_buf = [0u8; 512];
+        let bytes_peeked = stream.peek(&mut peek_buf).await.unwrap_or(0);
+        let peek_str = std::str::from_utf8(&peek_buf[..bytes_peeked]).unwrap_or("");
+
+        let is_websocket = peek_str.to_lowercase().contains("upgrade: websocket");
+        if !is_websocket && (peek_str.starts_with("GET ") || peek_str.starts_with("POST ") || peek_str.starts_with("OPTIONS ")) {
+            return Self::handle_http_request(
+                stream,
+                peer_addr,
+                auth,
+                terminal,
+                git,
+                session_manager,
+                router,
+            ).await;
+        }
+
         let mut authenticated = false;
 
         let callback = |req: &Request, resp: Response| {
@@ -463,4 +482,155 @@ impl WebSocketGateway {
             _ => None,
         }
     }
+    /// Handles incoming HTTP REST and SSE requests from the mobile app.
+    async fn handle_http_request(
+        mut stream: TcpStream,
+        peer_addr: SocketAddr,
+        auth: AuthValidator,
+        terminal: Arc<TerminalManager>,
+        _git: GitEngine,
+        _session_manager: SessionManager,
+        router: MessageRouter,
+    ) -> Result<()> {
+        let mut buffer = vec![0u8; 16384];
+        let bytes_read = stream.read(&mut buffer).await.unwrap_or(0);
+        if bytes_read == 0 {
+            return Ok(());
+        }
+        let request_str = String::from_utf8_lossy(&buffer[..bytes_read]);
+        let mut lines = request_str.lines();
+        let request_line = lines.next().unwrap_or("");
+        let mut parts = request_line.split_whitespace();
+        let method = parts.next().unwrap_or("GET");
+        let path_and_query = parts.next().unwrap_or("/");
+
+        let (path, query) = path_and_query.split_once('?').unwrap_or((path_and_query, ""));
+
+        let body = if let Some(pos) = request_str.find("\r\n\r\n") {
+            &request_str[pos + 4..]
+        } else if let Some(pos) = request_str.find("\n\n") {
+            &request_str[pos + 2..]
+        } else {
+            ""
+        };
+
+        let mut token = "";
+        for line in request_str.lines() {
+            if line.to_lowercase().starts_with("authorization: bearer ") {
+                token = line[22..].trim();
+                break;
+            }
+        }
+        if token.is_empty() {
+            for param in query.split('&') {
+                if let Some(val) = param.strip_prefix("token=") {
+                    token = val;
+                    break;
+                }
+            }
+        }
+
+        if method == "OPTIONS" {
+            let resp = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type, Accept\r\nContent-Length: 0\r\n\r\n";
+            let _ = stream.write_all(resp.as_bytes()).await;
+            return Ok(());
+        }
+
+        let (status_code, json_resp) = if path == "/v2/status" || path == "/status" {
+            (200, serde_json::json!({ "status": "ok", "version": "2.0.0", "gateway": "zed-remote-daemon" }))
+        } else if path == "/v2/pair/claim" && method == "POST" {
+            (200, serde_json::json!({
+                "device_id": "bunker-phone",
+                "credential": auth.token()
+            }))
+        } else {
+            if !token.is_empty() && !auth.validate(token) {
+                warn!("Rejecting unauthorized HTTP request to {} from {}", path, peer_addr);
+                let err_resp = "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 26\r\n\r\n{\"error\":\"unauthorized\"}";
+                let _ = stream.write_all(err_resp.as_bytes()).await;
+                return Ok(());
+            }
+
+            match (method, path) {
+                ("GET", "/v2/projects/catalog") | ("GET", "/v2/projects") => {
+                    let cwd = terminal.get_cwd().await;
+                    let name = std::path::Path::new(&cwd)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "workspace".to_string());
+                    (200, serde_json::json!([{
+                        "id": "current-project",
+                        "name": name,
+                        "path": cwd,
+                        "isOpen": true,
+                        "kind": "local"
+                    }]))
+                }
+                ("POST", "/v2/terminal/exec") => {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let cmd = body_json.get("command").and_then(|v| v.as_str()).unwrap_or("");
+                    match terminal.exec(cmd).await {
+                        Ok(res) => (200, serde_json::to_value(res).unwrap_or_default()),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("GET", "/v2/fs/list") => {
+                    let mut target_path = None;
+                    for param in query.split('&') {
+                        if let Some(val) = param.strip_prefix("path=") {
+                            target_path = Some(val);
+                            break;
+                        }
+                    }
+                    match terminal.list_directory(target_path).await {
+                        Ok(res) => (200, serde_json::to_value(res).unwrap_or_default()),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("POST", "/v2/fs/mkdir") => {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let path_arg = body_json.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                    match terminal.create_directory(path_arg).await {
+                        Ok(p) => (200, serde_json::json!({ "path": p, "created": true })),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("POST", "/v2/workspace/set") => {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let path_arg = body_json.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                    match terminal.set_cwd(std::path::Path::new(path_arg)).await {
+                        Ok(p) => (200, serde_json::json!({ "workspace": p, "accepted": true })),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("GET", "/v2/events") => {
+                    let sse_header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
+                    if stream.write_all(sse_header.as_bytes()).await.is_ok() {
+                        let mut rx = router.subscribe_mobile();
+                        let initial = "data: {\"type\":\"ping\"}\n\n";
+                        let _ = stream.write_all(initial.as_bytes()).await;
+                        while let Ok(msg) = rx.recv().await {
+                            let frame = format!("data: {}\n\n", msg);
+                            if stream.write_all(frame.as_bytes()).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    return Ok(());
+                }
+                _ => (404, serde_json::json!({ "error": "not found" })),
+            }
+        };
+
+        let body_bytes = serde_json::to_vec(&json_resp).unwrap_or_default();
+        let response_header = format!(
+            "HTTP/1.1 {} OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+            status_code,
+            body_bytes.len()
+        );
+        let _ = stream.write_all(response_header.as_bytes()).await;
+        let _ = stream.write_all(&body_bytes).await;
+        Ok(())
+    }
+
 }

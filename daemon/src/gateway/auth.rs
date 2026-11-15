@@ -15,6 +15,11 @@ impl AuthValidator {
         Self { secret_token }
     }
 
+    /// Returns the configured secret token.
+    pub fn token(&self) -> &str {
+        &self.secret_token
+    }
+
     /// Verifies that a presented token string matches the configured secret token.
     pub fn validate(&self, presented: &str) -> bool {
         let trimmed = presented.trim();
