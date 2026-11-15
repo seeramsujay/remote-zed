@@ -39,11 +39,7 @@ def main():
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 """
         if "android.permission.INTERNET" not in content:
-            content = content.replace("<manifest", f"<manifest\n{permissions}", 1)
-            # Fix if placed right inside <manifest ...>
-            if f"<manifest\n{permissions}" in content:
-                # Place right after opening <manifest ...> tag
-                content = re.sub(r"(<manifest[^>]*>)", r"\1" + permissions, content)
+            content = re.sub(r"(<manifest\b[^>]*>)", r"\1\n" + permissions, content, count=1)
             with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
                 f.write(content)
             print("Injected required permissions into Flutter AndroidManifest.xml")
@@ -68,10 +64,10 @@ def main():
     }
 """
             if "signingConfigs" not in gcontent:
-                gcontent = gcontent.replace("android {", f"android {{\n{signing_block}", 1)
+                gcontent = re.sub(r"(android\s*\{)", r"\1\n" + signing_block, gcontent, count=1)
             gcontent = re.sub(
-                r'buildTypes\s*\{\s*release\s*\{',
-                'buildTypes {\n        release {\n            signingConfig = signingConfigs.getByName("release")',
+                r'signingConfig\s*=\s*signingConfigs\.[a-zA-Z0-9_]+',
+                'signingConfig = signingConfigs.getByName("release")',
                 gcontent
             )
         else:
@@ -89,10 +85,10 @@ def main():
     }
 """
             if "signingConfigs" not in gcontent:
-                gcontent = gcontent.replace("android {", f"android {{\n{signing_block}", 1)
+                gcontent = re.sub(r"(android\s*\{)", r"\1\n" + signing_block, gcontent, count=1)
             gcontent = re.sub(
-                r'buildTypes\s*\{\s*release\s*\{',
-                'buildTypes {\n        release {\n            signingConfig signingConfigs.release',
+                r'signingConfig\s+signingConfigs\.[a-zA-Z0-9_]+',
+                'signingConfig signingConfigs.release',
                 gcontent
             )
 
