@@ -75,7 +75,7 @@ def main():
 
             # Replace signingConfig in release buildType
             gcontent = re.sub(
-                r'signingConfig\s*=\s*signingConfigs\.[a-zA-Z0-9_]+',
+                r'signingConfig\s*=.*',
                 'signingConfig = signingConfigs.getByName("release")',
                 gcontent
             )
@@ -100,7 +100,7 @@ def main():
                     gcontent = re.sub(r"(android\s*\{)", r"\1\n" + signing_block, gcontent, count=1)
 
             gcontent = re.sub(
-                r'signingConfig\s+signingConfigs\.[a-zA-Z0-9_]+',
+                r'signingConfig\s+.*',
                 'signingConfig signingConfigs.release',
                 gcontent
             )
