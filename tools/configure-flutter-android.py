@@ -20,6 +20,8 @@ def main():
         os.makedirs(os.path.dirname(DEST_KEYSTORE), exist_ok=True)
         shutil.copy2(SRC_KEYSTORE, DEST_KEYSTORE)
         print(f"Copied {SRC_KEYSTORE} -> {DEST_KEYSTORE}")
+    else:
+        print(f"Warning: Keystore {SRC_KEYSTORE} not found!")
 
     # 2. Add permissions to AndroidManifest.xml
     if os.path.exists(MANIFEST_PATH):
@@ -60,11 +62,18 @@ def main():
             keyPassword = "zedremoterelease"
             enableV1Signing = true
             enableV2Signing = true
+            enableV3Signing = true
+            enableV4Signing = false
         }
     }
 """
-            if "signingConfigs" not in gcontent:
-                gcontent = re.sub(r"(android\s*\{)", r"\1\n" + signing_block, gcontent, count=1)
+            if "zedremoterelease" not in gcontent:
+                if "buildTypes {" in gcontent:
+                    gcontent = re.sub(r"(buildTypes\s*\{)", signing_block + "\n    \\1", gcontent, count=1)
+                else:
+                    gcontent = re.sub(r"(android\s*\{)", r"\1\n" + signing_block, gcontent, count=1)
+
+            # Replace signingConfig in release buildType
             gcontent = re.sub(
                 r'signingConfig\s*=\s*signingConfigs\.[a-zA-Z0-9_]+',
                 'signingConfig = signingConfigs.getByName("release")',
@@ -84,8 +93,12 @@ def main():
         }
     }
 """
-            if "signingConfigs" not in gcontent:
-                gcontent = re.sub(r"(android\s*\{)", r"\1\n" + signing_block, gcontent, count=1)
+            if "zedremoterelease" not in gcontent:
+                if "buildTypes {" in gcontent:
+                    gcontent = re.sub(r"(buildTypes\s*\{)", signing_block + "\n    \\1", gcontent, count=1)
+                else:
+                    gcontent = re.sub(r"(android\s*\{)", r"\1\n" + signing_block, gcontent, count=1)
+
             gcontent = re.sub(
                 r'signingConfig\s+signingConfigs\.[a-zA-Z0-9_]+',
                 'signingConfig signingConfigs.release',

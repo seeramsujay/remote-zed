@@ -74,6 +74,7 @@ jobs:
           flutter create --org dev.zed.mobile --platforms=android .
           cd ..
           python3 tools/configure-flutter-android.py
+          head -n 60 app/android/app/build.gradle.kts || true
           cd app
           flutter pub get
           flutter build apk --release

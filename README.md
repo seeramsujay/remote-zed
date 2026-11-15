@@ -104,15 +104,31 @@ Zed Remote places a lightweight proxy daemon between Zed and your AI agent execu
 
 ### ⚡ Complete One-Line Install (Laptop)
 
-Run this single command on your laptop to set up Zed Remote, configure Zed, and generate your desktop binaries:
+Run this single command on your laptop to install Zed Remote, configure Zed, and set up your bunker tunnel (interactive prompt allows enabling an automatic systemd background service):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/seeramsujay/remote-zed/main/install.sh | bash
 ```
 
-Once installed, simply run:
+#### 1. Bind your phone once:
+```bash
+zed-tunnel --bind
+```
+Scan the terminal QR code once in the mobile app. The session channel and AES-GCM encryption key are permanently saved on both devices.
+
+#### 2. Everyday connection (no QR scanning needed):
 ```bash
 zed-tunnel
+```
+Starts the tunnel and dynamically publishes encrypted updates to your phone in the background.
+
+#### 3. Autostart & Service Management:
+```bash
+zed-tunnel --service enable   # Start automatically on system boot via systemd user service
+zed-tunnel --service disable  # Revert to on-demand mode
+zed-tunnel --status           # Check tunnel and systemd service status
+zed-tunnel -h                 # Display help and commands
+zed-tunnel --update           # Update Zed Remote to latest release
 ```
 
 ---
