@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
         agent_stdin_tx,
         zed_stdout_tx,
         session_manager.clone(),
-        security,
+        security.clone(),
     );
 
     // Task 1: Write to agent stdin
