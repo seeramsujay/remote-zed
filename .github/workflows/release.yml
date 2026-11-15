@@ -69,7 +69,7 @@ jobs:
       - name: Build daemon release binary
         run: |
           cd daemon
-          cargo build --release --locked
+          cargo build --release
 
       - name: Package daemon binary
         run: |
