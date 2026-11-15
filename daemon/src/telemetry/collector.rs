@@ -62,7 +62,7 @@ impl TelemetryCollector {
         let kernel = System::kernel_version().unwrap_or_default();
         let os = format!("{} {}", os_name, kernel).trim().to_string();
 
-        let cpu_usage_percent = sys.global_cpu_usage();
+        let cpu_usage_percent = sys.global_cpu_info().cpu_usage();
         let memory_used_bytes = sys.used_memory();
         let memory_total_bytes = sys.total_memory();
         let uptime_seconds = System::uptime();

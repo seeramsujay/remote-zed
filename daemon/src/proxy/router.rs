@@ -22,7 +22,7 @@ pub struct PendingPermission {
 #[derive(Clone)]
 pub struct MessageRouter {
     /// Broadcast channel distributing agent updates and tool prompts to connected mobile clients.
-    mobile_broadcast_tx: broadcast::Sender<String>,
+    pub mobile_broadcast_tx: broadcast::Sender<String>,
     /// MPSC sender for dispatching NDJSON strings directly to the child agent's stdin.
     agent_stdin_tx: mpsc::Sender<String>,
     /// MPSC sender for dispatching NDJSON strings back to Zed's stdout.
