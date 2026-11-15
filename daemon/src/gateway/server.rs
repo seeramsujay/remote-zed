@@ -624,6 +624,7 @@ impl WebSocketGateway {
                     let mut state = thread_state.lock().await;
                     if let Some(mode_id) = body_json.get("mode_id").and_then(|v| v.as_str()) {
                         state.current_mode = mode_id.to_string();
+                        router.set_mode(mode_id).await;
                     }
                     let mode = state.current_mode.clone();
                     drop(state);
@@ -748,6 +749,36 @@ impl WebSocketGateway {
                     }
                 }).to_string();
                 let _ = router.handle_mobile_message(&cancel_rpc).await;
+                (200, serde_json::json!({
+                    "accepted": true
+                }))
+            } else if path.contains("/threads/") && path.ends_with("/approvals") && method == "GET" {
+                let approvals = router.get_pending_approvals().await;
+                (200, serde_json::json!({
+                    "approvals": approvals
+                }))
+            } else if path.contains("/threads/") && path.contains("/approvals/") && path.ends_with("/resolve") && method == "POST" {
+                let tool_call_id = path
+                    .strip_suffix("/resolve")
+                    .and_then(|p| p.split("/approvals/").nth(1))
+                    .unwrap_or("");
+                let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                let option_id = body_json
+                    .get("option_id")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| body_json.get("decision").and_then(|v| v.as_str()))
+                    .unwrap_or("allow_once");
+                let resolved = router.resolve_approval(tool_call_id, option_id).await;
+                if resolved {
+                    (200, serde_json::json!({ "accepted": true }))
+                } else {
+                    (404, serde_json::json!({ "error": "Approval not found or already resolved" }))
+                }
+            } else if path.contains("/threads/") && path.ends_with("/elicitations") && method == "GET" {
+                (200, serde_json::json!({
+                    "elicitations": []
+                }))
+            } else if path.contains("/threads/") && path.contains("/elicitations/") && path.ends_with("/respond") && method == "POST" {
                 (200, serde_json::json!({
                     "accepted": true
                 }))

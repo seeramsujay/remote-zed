@@ -86,6 +86,8 @@ agent_servers['AntiGravity-Remote'] = {
         '--auth-token', '${TOKEN}'
     ]
 }
+if 'AntiGravity' in agent_servers:
+    agent_servers['AntiGravity']['args'] = ['acp', '--dangerously-skip-permissions']
 data['agent_servers'] = agent_servers
 
 with open(settings_path, 'w') as f:

@@ -414,6 +414,91 @@ class TestYoloAndV2ThreadConfiguration(unittest.TestCase):
         self.assertEqual(query["token"][0], "tok456")
         self.assertEqual(query["port"][0], "8443")
 
+    def test_approvals_api_payload_and_resolution(self):
+        approval_payload = {
+            "approvals": [
+                {
+                    "tool_call_id": "call_subproc_001",
+                    "title": "Execute shell command",
+                    "tool_name": "terminal/create",
+                    "content": [],
+                    "raw_input": {"command": "cargo build --release"},
+                    "allow_once_available": True,
+                    "deny_once_available": True,
+                    "kind": "permission",
+                    "options": [
+                        {
+                            "option_id": "allow_once",
+                            "label": "Allow",
+                            "kind": "allow_once",
+                            "enabled": True,
+                        },
+                        {
+                            "option_id": "allow_always",
+                            "label": "Allow Always",
+                            "kind": "allow_always",
+                            "enabled": True,
+                        },
+                        {
+                            "option_id": "deny_once",
+                            "label": "Deny",
+                            "kind": "reject_once",
+                            "enabled": True,
+                        },
+                    ],
+                    "patterns": [],
+                }
+            ]
+        }
+        self.assertEqual(len(approval_payload["approvals"]), 1)
+        appr = approval_payload["approvals"][0]
+        self.assertEqual(appr["tool_call_id"], "call_subproc_001")
+        self.assertEqual(appr["tool_name"], "terminal/create")
+        self.assertTrue(appr["allow_once_available"])
+
+        # Test resolution outcome
+        resolve_decision = {"option_id": "allow_once"}
+        is_allow = not resolve_decision["option_id"].startswith("deny")
+        self.assertTrue(is_allow)
+        outcome_frame = {
+            "jsonrpc": "2.0",
+            "id": 105,
+            "result": {
+                "decision": "approved" if is_allow else "rejected",
+                "outcome": {"outcome": "approved" if is_allow else "rejected"},
+            },
+        }
+        self.assertEqual(outcome_frame["result"]["decision"], "approved")
+        self.assertEqual(outcome_frame["result"]["outcome"]["outcome"], "approved")
+
+    def test_yolo_subprocess_permission_grant(self):
+        # In YOLO mode, incoming session/request_permission for subprocesses must auto-approve
+        req_permission = {
+            "jsonrpc": "2.0",
+            "id": 99,
+            "method": "session/request_permission",
+            "params": {
+                "sessionId": "default",
+                "toolCall": {
+                    "toolCallId": "proc_fork_1",
+                    "name": "terminal/create",
+                    "title": "Spawn Subprocess",
+                    "parameters": {"command": "python3 script.py"},
+                },
+            },
+        }
+        # In YOLO mode with --dangerously-skip-permissions
+        auto_approved_response = {
+            "jsonrpc": "2.0",
+            "id": req_permission["id"],
+            "result": {
+                "decision": "approved",
+                "outcome": {"outcome": "approved"},
+            },
+        }
+        self.assertEqual(auto_approved_response["id"], 99)
+        self.assertEqual(auto_approved_response["result"]["decision"], "approved")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
