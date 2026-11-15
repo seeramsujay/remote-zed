@@ -70,7 +70,7 @@ agent_servers['AntiGravity-Remote'] = {
         '--target-command', 'antigravity',
         '--target-args', 'acp',
         '--port', '8443',
-        '--token', '${TOKEN}'
+        '--auth-token', '${TOKEN}'
     ]
 }
 data['agent_servers'] = agent_servers
