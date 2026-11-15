@@ -19,9 +19,9 @@ Zed Remote bridges your desktop development environment running the Zed editor w
 
 ---
 
-## Two Integration Options for Official Zed
+## Two Zero-Rebuild Integration Options for Official Zed
 
-You have two simple ways to link Zed Remote with official Zed desktop releases without compiling Zed from source:
+You do not need to fork or compile Zed from source. Use either of these zero-build options with any official Zed release:
 
 ### 🚀 Option 1: Daemon Injection (`settings.json`) — Recommended
 Configures `zed-remote-daemon` as an ACP agent server in `~/.config/zed/settings.json`.
@@ -54,8 +54,8 @@ Run:
 | `android/` | Android Client (Jetpack Compose) | Native Material 3 app with Dynamic Colors, Termux-style terminal, filesystem browser, and Bunker QR rendezvous. |
 | `daemon/` | Rust Host Daemon & Bunker Runner | Proxy binary that intercepts Zed stdio, exposes dual HTTP REST + WebSocket endpoints, and manages terminal/Git execution. |
 | `extensions/`| Zed Dev Extension | Native Zed extension (`extension.toml`, Wasm crate) with MCP server and `/bunker` slash command. |
-| `tools/` | Automation & Security Scripts | `bunker-tunnel.sh` (AES-256-GCM rendezvous), `inject-daemon.sh`, `install-extension.sh`, and `sync-zed-fork.sh`. |
-| `patches/` | Zed Upstream Patches | `zed-mobile-gateway.patch` for building custom Zed desktop gateway forks if desired. |
+| `tools/` | Automation & Security Scripts | `bunker-tunnel.sh` (AES-256-GCM rendezvous), `inject-daemon.sh`, and `install-extension.sh`. |
+| `patches/` | Zed Upstream Patches | `zed-mobile-gateway.patch` containing reference patches for the Zed GPUI gateway if needed. |
 | `app/` | Flutter Mobile Client | Alternative cross-platform Flutter mobile client. |
 
 ---
@@ -84,14 +84,3 @@ Key:   [REDACTED AES-256-GCM KEY]
 2. Tap the QR scanner icon on the pairing screen.
 3. Scan the terminal QR code.
 4. The app resolves the tunnel from the rendezvous channel, decrypts it on-device with AES-256-GCM, and connects immediately!
-
----
-
-## Upstream Zed Fork Maintenance
-
-If you ever wish to keep your GitHub fork updated with official upstream releases:
-
-```bash
-./tools/sync-zed-fork.sh
-```
-This fetches `zed-industries/zed:main`, rebases `feature/mobile-gateway` on your fork (`seeramsujay/zed`), and pushes the updated branch.
