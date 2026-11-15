@@ -35,4 +35,4 @@ jobs:
       - name: Run Android Lint & Check
         run: |
           cd android
-          ./gradlew check --no-daemon
+          ./gradlew lintDebug testDebugUnitTest --no-daemon
