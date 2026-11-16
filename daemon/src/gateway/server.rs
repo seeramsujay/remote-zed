@@ -737,26 +737,42 @@ impl WebSocketGateway {
                     }]
                 }))
             } else if path.ends_with("/threads") && method == "GET" {
+                let discovered_sessions = session_manager.list_sessions().await;
                 let state = thread_state.lock().await;
-                let mut threads_list = vec![serde_json::json!({
-                    "id": "main-thread",
-                    "title": "AntiGravity AI Workspace",
-                    "status": "ready",
-                    "agent": {
-                        "id": "antigravity",
-                        "name": "AntiGravity Agent",
-                        "is_native": false
-                    }
-                })];
+                let mut threads_list = Vec::new();
+
+                // 1. Add real AntiGravity recorded sessions discovered from ~/.zed-remote/sessions
+                for s in discovered_sessions {
+                    threads_list.push(s);
+                }
+
+                // 2. Add custom threads created in this session (e.g. Pi agent threads)
                 for ct in &state.custom_threads {
-                    let agent_name = if ct.agent_id == "pi" { "Pi Agent" } else { "AntiGravity Agent" };
+                    if !threads_list.iter().any(|t| t.get("id").and_then(|v| v.as_str()) == Some(&ct.id)) {
+                        let agent_name = if ct.agent_id == "pi" { "Pi Agent" } else { "AntiGravity Agent" };
+                        threads_list.push(serde_json::json!({
+                            "id": ct.id,
+                            "title": ct.title,
+                            "status": ct.status,
+                            "agent": {
+                                "id": ct.agent_id,
+                                "name": agent_name,
+                                "is_native": false
+                            }
+                        }));
+                    }
+                }
+                drop(state);
+
+                // 3. Fallback placeholder if no sessions exist at all
+                if threads_list.is_empty() {
                     threads_list.push(serde_json::json!({
-                        "id": ct.id,
-                        "title": ct.title,
-                        "status": ct.status,
+                        "id": "main-thread",
+                        "title": "AntiGravity AI Workspace",
+                        "status": "ready",
                         "agent": {
-                            "id": ct.agent_id,
-                            "name": agent_name,
+                            "id": "antigravity",
+                            "name": "AntiGravity Agent",
                             "is_native": false
                         }
                     }));
@@ -994,12 +1010,17 @@ impl WebSocketGateway {
                         }).to_string();
                         let _ = router.mobile_broadcast_tx.send(notif);
                     } else {
+                        let prompt_session_id = if req_thread_id == "main-thread" {
+                            router.get_active_session_id().await.unwrap_or_else(|| "default".to_string())
+                        } else {
+                            req_thread_id.to_string()
+                        };
                         let prompt_rpc = serde_json::json!({
                             "jsonrpc": "2.0",
                             "id": 1,
                             "method": "session/prompt",
                             "params": {
-                                "sessionId": req_thread_id,
+                                "sessionId": prompt_session_id,
                                 "prompt": [{
                                     "type": "text",
                                     "text": text
@@ -1057,78 +1078,47 @@ impl WebSocketGateway {
                 }))
             } else if (path.starts_with("/v2/threads/") || path.starts_with("/threads/")) && method == "GET" {
                 let thread_id = path.rsplit('/').next().unwrap_or("main-thread");
-                let mut state = thread_state.lock().await;
                 let approvals = router.get_pending_approvals().await;
-                if thread_id == "main-thread" {
-                    if state.messages.is_empty() {
-                        let recovered = session_manager.get_chat_messages(state.active_session_id.as_deref()).await;
-                        if !recovered.is_empty() {
-                            state.messages = recovered;
-                        }
-                    }
-                    let messages = state.messages.clone();
-                    let transcript = state.transcript.clone();
-                    drop(state);
-                    (200, serde_json::json!({
-                        "id": "main-thread",
-                        "title": "AntiGravity AI Workspace",
-                        "status": "ready",
-                        "agent": {
-                            "id": "antigravity",
-                            "name": "AntiGravity Agent",
-                            "is_native": false
-                        },
-                        "messages": messages,
-                        "transcript": transcript,
-                        "approvals": approvals,
-                        "elicitations": []
-                    }))
-                } else if let Some(ct) = state.custom_threads.iter_mut().find(|t| t.id == thread_id) {
-                    let agent_name = if ct.agent_id == "pi" { "Pi Agent" } else { "AntiGravity Agent" };
-                    if ct.messages.is_empty() {
-                        let recovered = session_manager.get_chat_messages(ct.active_session_id.as_deref()).await;
-                        if !recovered.is_empty() {
-                            ct.messages = recovered;
-                        }
-                    }
-                    let ct_id = ct.id.clone();
-                    let title = ct.title.clone();
-                    let status = ct.status.clone();
-                    let agent_id = ct.agent_id.clone();
-                    let messages = ct.messages.clone();
-                    let transcript = ct.transcript.clone();
-                    drop(state);
-                    (200, serde_json::json!({
-                        "id": ct_id,
-                        "title": title,
-                        "status": status,
-                        "agent": {
-                            "id": agent_id,
-                            "name": agent_name,
-                            "is_native": false
-                        },
-                        "messages": messages,
-                        "transcript": transcript,
-                        "approvals": approvals,
-                        "elicitations": []
-                    }))
+                let state = thread_state.lock().await;
+
+                let (resolved_id, title, agent_id, agent_name, mut cached_msgs, mut cached_transcript) = if thread_id == "main-thread" {
+                    let active = router.get_active_session_id().await;
+                    (active, "AntiGravity AI Workspace".to_string(), "antigravity".to_string(), "AntiGravity Agent".to_string(), state.messages.clone(), state.transcript.clone())
+                } else if let Some(ct) = state.custom_threads.iter().find(|t| t.id == thread_id) {
+                    let name = if ct.agent_id == "pi" { "Pi Agent" } else { "AntiGravity Agent" };
+                    let session_target = ct.active_session_id.clone().or_else(|| Some(thread_id.to_string()));
+                    (session_target, ct.title.clone(), ct.agent_id.clone(), name.to_string(), ct.messages.clone(), ct.transcript.clone())
                 } else {
-                    drop(state);
-                    (200, serde_json::json!({
-                        "id": thread_id,
-                        "title": "New Conversation",
-                        "status": "ready",
-                        "agent": {
-                            "id": "antigravity",
-                            "name": "AntiGravity Agent",
-                            "is_native": false
-                        },
-                        "messages": [],
-                        "transcript": [],
-                        "approvals": approvals,
-                        "elicitations": []
-                    }))
+                    let short_id = if thread_id.len() >= 8 { &thread_id[..8] } else { thread_id };
+                    (Some(thread_id.to_string()), format!("AntiGravity Session {}", short_id), "antigravity".to_string(), "AntiGravity Agent".to_string(), Vec::new(), Vec::new())
+                };
+                drop(state);
+
+                // Recover chat messages & transcript from the disk session logs
+                let mut messages = session_manager.get_chat_messages(resolved_id.as_deref()).await;
+                let mut transcript = session_manager.get_chat_transcript(resolved_id.as_deref()).await;
+
+                if messages.is_empty() && !cached_msgs.is_empty() {
+                    messages = cached_msgs;
                 }
+                if transcript.is_empty() && !cached_transcript.is_empty() {
+                    transcript = cached_transcript;
+                }
+
+                (200, serde_json::json!({
+                    "id": thread_id,
+                    "title": title,
+                    "status": "ready",
+                    "agent": {
+                        "id": agent_id,
+                        "name": agent_name,
+                        "is_native": false
+                    },
+                    "messages": messages,
+                    "transcript": transcript,
+                    "approvals": approvals,
+                    "elicitations": []
+                }))
             } else {
                 match (method, path) {
                 ("POST", "/v2/terminal/exec") => {
@@ -1274,7 +1264,11 @@ impl WebSocketGateway {
                         let initial = "data: {\"type\":\"ping\"}\n\n";
                         let _ = stream.write_all(initial.as_bytes()).await;
                         while let Ok(msg) = rx.recv().await {
-                            let frame = format!("data: {}\n\n", msg);
+                            let frame = if msg.starts_with("event:") {
+                                msg
+                            } else {
+                                format!("data: {}\n\n", msg)
+                            };
                             if stream.write_all(frame.as_bytes()).await.is_err() {
                                 break;
                             }

@@ -17,6 +17,7 @@ import hmac
 import json
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
 import unittest
@@ -516,6 +517,155 @@ class TestYoloAndV2ThreadConfiguration(unittest.TestCase):
         manual_resp = route_permission_request(req_permission, mode="auto")
         self.assertEqual(manual_resp["status"], "pending_approval")
         self.assertEqual(manual_resp["tool_call_id"], "proc_fork_1")
+
+
+class TestBunkerTunnelSupervisor(unittest.TestCase):
+    """Verifies bunker-tunnel CLI interface, supervisor locking, and lifecycle safety."""
+
+    def setUp(self):
+        self.script_path = REPO_ROOT / "tools" / "bunker-tunnel.sh"
+        self.assertTrue(
+            self.script_path.is_file(), f"Missing {self.script_path}"
+        )
+
+    def test_help_flag_output(self):
+        res = subprocess.run(
+            ["bash", str(self.script_path), "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("Zed Remote Bunker Tunnel", res.stdout)
+        self.assertIn("zedt", res.stdout)
+        self.assertIn("--stop", res.stdout)
+
+    def test_status_flag_output(self):
+        res = subprocess.run(
+            ["bash", str(self.script_path), "--status"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("Zed Remote Status:", res.stdout)
+        self.assertIn("Tunnel Process:", res.stdout)
+
+    def test_supervisor_flock_and_cleanup_isolation(self):
+        """Simulate supervisor locking, verifying no re-entrant cleanup and clean lock release."""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            test_script = f"""#!/usr/bin/env bash
+set -euo pipefail
+PID_FILE="{temp_dir}/zed-tunnel.pid"
+LOCK_FILE="{temp_dir}/zed-tunnel.lock"
+
+acquire_lock() {{
+    if command -v flock &>/dev/null; then
+        flock -n 200
+    else
+        python3 -c "import fcntl, sys; fcntl.flock(200, fcntl.LOCK_EX | fcntl.LOCK_NB)"
+    fi
+}}
+
+release_lock() {{
+    if command -v flock &>/dev/null; then
+        flock -u 200 2>/dev/null || true
+    else
+        python3 -c "import fcntl; fcntl.flock(200, fcntl.LOCK_UN)" 2>/dev/null || true
+    fi
+    exec 200>&- 2>/dev/null || true
+}}
+
+HAS_LOCK=false
+CLEANING_UP=false
+
+cleanup() {{
+    if [[ "$CLEANING_UP" = true ]]; then
+        return
+    fi
+    CLEANING_UP=true
+    trap - SIGINT SIGTERM EXIT
+    echo "[*] Shutting down pinggy tunnel..."
+    if [[ "$HAS_LOCK" = true ]]; then
+        rm -f "$PID_FILE"
+        release_lock
+    fi
+    exit 0
+}}
+
+trap 'exit 130' SIGINT SIGTERM
+
+exec 200>"$LOCK_FILE"
+if ! acquire_lock; then
+    echo "[!] Another zed-tunnel supervisor is already running."
+    exit 1
+fi
+HAS_LOCK=true
+echo $$ > "$PID_FILE"
+trap cleanup SIGINT SIGTERM EXIT
+
+echo "[+] Tunnel is LIVE"
+while true; do
+    sleep 0.1
+done
+"""
+            runner = Path(temp_dir) / "run_tunnel.sh"
+            runner.write_text(test_script)
+            runner.chmod(0o755)
+
+            # 1. Start primary instance
+            p1 = subprocess.Popen(
+                ["bash", str(runner)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            # Wait for live line
+            self.assertIsNotNone(p1.stdout)
+            while True:
+                line = p1.stdout.readline() if p1.stdout else ""
+                if "Tunnel is LIVE" in line:
+                    break
+
+            # 2. Concurrent instance must fail with exit code 1
+            p2 = subprocess.run(
+                ["bash", str(runner)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=3,
+            )
+            self.assertEqual(p2.returncode, 1)
+            self.assertIn("Another zed-tunnel supervisor is already running", p2.stdout)
+            self.assertNotIn("[*] Shutting down pinggy tunnel...", p2.stdout)
+
+            # 3. Terminate p1 with SIGINT
+            p1.send_signal(signal.SIGINT)
+            out1, _ = p1.communicate(timeout=3)
+            self.assertEqual(p1.returncode, 0)
+            self.assertEqual(out1.count("[*] Shutting down pinggy tunnel..."), 1)
+
+            # 4. Immediate follow-up run must succeed (lock freed, PID file gone)
+            self.assertFalse((Path(temp_dir) / "zed-tunnel.pid").exists())
+            p3 = subprocess.Popen(
+                ["bash", str(runner)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertIsNotNone(p3.stdout)
+            while True:
+                line = p3.stdout.readline() if p3.stdout else ""
+                if "Tunnel is LIVE" in line:
+                    break
+            p3.send_signal(signal.SIGINT)
+            p3.communicate(timeout=3)
+            self.assertEqual(p3.returncode, 0)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

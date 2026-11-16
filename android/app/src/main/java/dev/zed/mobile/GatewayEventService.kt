@@ -148,6 +148,12 @@ class GatewayEventService : Service() {
                 "${event.threadTitle} needs attention in ${event.projectName} on your paired desktop.",
                 Notification.CATEGORY_ERROR,
             )
+
+            AgentCompletionEventType.QUESTION -> Triple(
+                "Agent permission required",
+                "${event.threadTitle} in ${event.projectName} is waiting for your approval.",
+                Notification.CATEGORY_REMINDER,
+            )
         }
         val notificationId = nextNotificationId()
         val notification = Notification.Builder(this, EVENT_CHANNEL_ID)

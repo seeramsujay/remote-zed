@@ -97,7 +97,7 @@ object BunkerTunnel {
             var lastError: Exception? = null
             for (server in servers) {
                 try {
-                    val ntfyUrl = "$server/${config.ntfyTopic}/raw?poll=1"
+                    val ntfyUrl = "$server/${config.ntfyTopic}/raw?poll=1&since=all"
                     val request = Request.Builder()
                         .url(ntfyUrl)
                         .header("User-Agent", "ZedRemote-Android/2.0")

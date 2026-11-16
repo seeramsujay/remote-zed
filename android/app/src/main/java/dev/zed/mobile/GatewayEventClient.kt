@@ -33,6 +33,7 @@ data class AgentCompletionEvent(
 enum class AgentCompletionEventType {
     COMPLETED,
     FAILED,
+    QUESTION,
 }
 
 /**
@@ -260,6 +261,7 @@ private fun JsonObject.requiredEventLabel(name: String): String? {
 private fun agentCompletionEventTypeFromSseName(name: String?): AgentCompletionEventType? = when (name) {
     "thread_completed" -> AgentCompletionEventType.COMPLETED
     "thread_failed" -> AgentCompletionEventType.FAILED
+    "thread_question" -> AgentCompletionEventType.QUESTION
     else -> null
 }
 
