@@ -630,13 +630,8 @@ class ZedViewModel(
      */
     fun startNewThread(projectId: String? = null) {
         val current = mutable.value
-        val target = projectId ?: current.projects.filter { it.isOpen }.singleOrNull()?.id
-        when {
-            target == null -> mutable.value = current.copy(newThread = NewThreadRequest(null))
-            current.projectAgents[target].orEmpty().any { !it.isNative } ->
-                mutable.value = current.copy(newThread = NewThreadRequest(target))
-            else -> createThread(target, null)
-        }
+        val target = projectId ?: current.projects.filter { it.isOpen }.firstOrNull()?.id ?: current.projects.firstOrNull()?.id
+        mutable.value = current.copy(newThread = NewThreadRequest(target))
     }
 
     fun dismissNewThread() {
@@ -669,7 +664,15 @@ class ZedViewModel(
         val session = chatEpoch
         viewModelScope.launch {
             try {
-                val thread = repo.createThread(projectId, agentId)
+                val thread = try {
+                    repo.createThread(projectId, agentId)
+                } catch (error: GatewayException) {
+                    if (agentId != null && error.message?.contains("API v2") == true) {
+                        repo.createThread(projectId, null)
+                    } else {
+                        throw error
+                    }
+                }
                 if (isCurrentChat("", session)) {
                     val latest = mutable.value
                     mutable.value = latest.copy(

@@ -99,9 +99,9 @@ fun GitScreen(
     if (showBranchesDialog) {
         AlertDialog(
             onDismissRequest = { showBranchesDialog = false },
-            containerColor = MaterialTheme.colorScheme.surface,
-            titleContentColor = MaterialTheme.colorScheme.onSurface,
-            textContentColor = MaterialTheme.colorScheme.onSurface,
+            containerColor = Color(0xFF1E1E26),
+            titleContentColor = Color(0xFFF3F3F7),
+            textContentColor = Color(0xFFF3F3F7),
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(

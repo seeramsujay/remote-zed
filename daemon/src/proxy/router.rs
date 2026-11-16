@@ -7,7 +7,7 @@ use crate::session::{MessageDirection, SessionManager};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
 /// Tracks pending permission requests awaiting user decision.
@@ -37,6 +37,8 @@ pub struct MessageRouter {
     security: SecurityGuard,
     /// Map of pending permission requests indexed by tool call ID or request ID string.
     pending_permissions: Arc<Mutex<HashMap<String, PendingPermission>>>,
+    /// Map of pending requests dispatched to the child agent awaiting a direct response.
+    pending_agent_requests: Arc<Mutex<HashMap<String, oneshot::Sender<serde_json::Value>>>>,
     /// Active operational mode (e.g. "yolo", "auto", "plan").
     current_mode: Arc<RwLock<String>>,
     /// Actively tracked session ID in flight between Zed and the agent.
@@ -59,6 +61,7 @@ impl MessageRouter {
             session_manager,
             security,
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
+            pending_agent_requests: Arc::new(Mutex::new(HashMap::new())),
             current_mode: Arc::new(RwLock::new("yolo".to_string())),
             active_session_id: Arc::new(RwLock::new(None)),
         }
@@ -86,6 +89,47 @@ impl MessageRouter {
         }
     }
 
+    /// Dispatches a raw line directly to Zed stdout so the desktop UI updates.
+    pub async fn send_to_zed_stdout(&self, line: &str) -> Result<()> {
+        self.zed_stdout_tx
+            .send(format_ndjson_line(line))
+            .await
+            .map_err(|e| crate::error::DaemonError::Internal(format!("Failed to send to Zed stdout: {}", e)))
+    }
+
+    /// Dispatches a request to the child agent and waits asynchronously for its matching response.
+    pub async fn dispatch_agent_request(&self, method: &str, params: serde_json::Value) -> std::result::Result<serde_json::Value, String> {
+        let req_id = format!("router-{}", uuid::Uuid::new_v4());
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut pending = self.pending_agent_requests.lock().await;
+            pending.insert(req_id.clone(), tx);
+        }
+
+        let rpc_msg = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "method": method,
+            "params": params
+        }).to_string();
+
+        if let Err(e) = self.agent_stdin_tx.send(format_ndjson_line(&rpc_msg)).await {
+            let mut pending = self.pending_agent_requests.lock().await;
+            pending.remove(&req_id);
+            return Err(format!("Failed to send to agent stdin: {}", e));
+        }
+
+        match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
+            Ok(Ok(val)) => Ok(val),
+            Ok(Err(_)) => Err("Agent dropped request channel".to_string()),
+            Err(_) => {
+                let mut pending = self.pending_agent_requests.lock().await;
+                pending.remove(&req_id);
+                Err("Agent request timed out after 5s".to_string())
+            }
+        }
+    }
+
     /// Dispatches an out-of-band push notification to the user's mobile device via Bunker ntfy topics.
     pub fn trigger_bunker_ntfy(title: &str, body: &str, tags: &str, priority: &str) {
         let title_owned = title.to_string();
@@ -97,20 +141,29 @@ impl MessageRouter {
                 Ok(h) => h,
                 Err(_) => return,
             };
-            let bunker_path = std::path::Path::new(&home).join(".zed-remote/bunker.json");
-            if !bunker_path.exists() {
-                return;
+            let candidates = [
+                std::path::Path::new(&home).join(".config/zed-remote/bunker-session.json"),
+                std::path::Path::new(&home).join(".zed-remote/bunker.json"),
+            ];
+            let mut found_topics: Vec<(std::time::SystemTime, String)> = Vec::new();
+            for bunker_path in &candidates {
+                if bunker_path.exists() {
+                    let mtime = match tokio::fs::metadata(bunker_path).await {
+                        Ok(meta) => meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH),
+                        Err(_) => std::time::SystemTime::UNIX_EPOCH,
+                    };
+                    if let Ok(content) = tokio::fs::read_to_string(bunker_path).await {
+                        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&content) {
+                            if let Some(t) = json_val.get("ntfy_topic").and_then(|t| t.as_str()) {
+                                found_topics.push((mtime, t.to_string()));
+                            }
+                        }
+                    }
+                }
             }
-            let content = match tokio::fs::read_to_string(&bunker_path).await {
-                Ok(c) => c,
-                Err(_) => return,
-            };
-            let json_val: serde_json::Value = match serde_json::from_str(&content) {
-                Ok(v) => v,
-                Err(_) => return,
-            };
-            let topic = match json_val.get("ntfy_topic").and_then(|t| t.as_str()) {
-                Some(t) => t,
+            found_topics.sort_by(|a, b| b.0.cmp(&a.0));
+            let topic = match found_topics.into_iter().next() {
+                Some((_, t)) => t,
                 None => return,
             };
 
@@ -120,6 +173,8 @@ impl MessageRouter {
                 let _ = tokio::process::Command::new("curl")
                     .args([
                         "-fsSL",
+                        "--max-time", "5",
+                        "--connect-timeout", "2",
                         "-X", "POST",
                         "-H", &format!("Title: {}", title_owned),
                         "-H", &format!("Priority: {}", prio_owned),
@@ -507,6 +562,16 @@ impl MessageRouter {
                             .await;
                     }
                 }
+                JsonRpcMessage::Response(res) => {
+                    let id_str = match &res.id {
+                        RequestId::String(s) => s.clone(),
+                        RequestId::Integer(i) => i.to_string(),
+                    };
+                    let mut pending = self.pending_agent_requests.lock().await;
+                    if let Some(tx) = pending.remove(&id_str) {
+                        let _ = tx.send(serde_json::to_value(res).unwrap_or_default());
+                    }
+                }
                 _ => {}
             }
         }
@@ -601,8 +666,6 @@ impl MessageRouter {
                             );
                         }
 
-                        // Also mirror to Zed stdout so desktop session updates stay in sync
-                        let _ = self.zed_stdout_tx.send(format_ndjson_line(&prompt_payload)).await;
 
                         // Acknowledge request receipt to mobile
                         Some(
@@ -612,6 +675,30 @@ impl MessageRouter {
                             ))
                             .unwrap_or_default(),
                         )
+                    }
+                    "session/new" => {
+                        match self.dispatch_agent_request("session/new", req.params.clone()).await {
+                            Ok(mut res_val) => {
+                                if let Some(session_id) = res_val.get("result").and_then(|r| r.get("sessionId")).and_then(|s| s.as_str()) {
+                                    self.set_active_session_id(session_id).await;
+                                }
+                                // Also notify Zed's stdout so desktop tracks the new session
+                                let _ = self.send_to_zed_stdout(&res_val.to_string()).await;
+                                // Restore original mobile request ID for correlation
+                                if let Some(obj) = res_val.as_object_mut() {
+                                    obj.insert("id".to_string(), serde_json::to_value(&req.id).unwrap_or(serde_json::Value::Null));
+                                }
+                                Some(res_val.to_string())
+                            }
+                            Err(e) => Some(
+                                serde_json::to_string(&JsonRpcResponse::error(
+                                    req.id,
+                                    error_codes::INTERNAL_ERROR,
+                                    format!("Failed to create new session: {}", e),
+                                ))
+                                .unwrap_or_default(),
+                            ),
+                        }
                     }
                     _ => None,
                 }

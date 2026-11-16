@@ -1,6 +1,10 @@
 package dev.zed.mobile
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.animation.AnimatedVisibility
@@ -29,6 +33,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -330,26 +335,215 @@ internal fun quietSwitchColors() = SwitchDefaults.colors(
 
 @Composable
 internal fun HomeScreen(state: MobileState, vm: ZedViewModel) {
-    val recents = state.recents.take(4)
+    val activeProject = state.projects.firstOrNull { it.isOpen } ?: state.projects.firstOrNull()
+    val activeChat = state.recents.firstOrNull { activeProject != null && it.project.id == activeProject.id }
+        ?: state.recents.firstOrNull()
+
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 4.dp, bottom = 120.dp)) {
         item(key = "desktop") { DesktopCard(state, onReconnect = vm::reconnect) }
         state.notice?.let { notice -> item(key = "notice") { InlineNotice(notice) } }
-        if (recents.isNotEmpty()) {
-            item(key = "recents-label") { HomeSectionLabel("Recents") }
-            item(key = "recents") {
+
+        // Active Workspace Window & Live Active Chat Card
+        if (activeProject != null) {
+            item(key = "active-window-label") { HomeSectionLabel("Active Laptop Window") }
+            item(key = "active-window-card") {
                 CardGroup {
-                    recents.forEachIndexed { index, recent ->
-                        ThreadRow(
-                            thread = recent.thread,
-                            projectName = recent.project.name,
-                            onClick = { vm.openThread(recent.thread, recent.project) },
-                        )
-                        if (index < recents.lastIndex) Hairline(inset = 48.dp)
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(Symbols.Dns, contentDescription = null, tint = Color(0xFFA58DFE), modifier = Modifier.size(20.dp))
+                            Text(
+                                activeProject.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color(0xFFF3F3F7),
+                                modifier = Modifier.weight(1f),
+                            )
+                            StatusDot(Color(0xFF34D399), size = 8.dp)
+                            Text("Active Window", style = MaterialTheme.typography.labelSmall, color = Color(0xFF34D399))
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(shortPath(activeProject.path), style = MaterialTheme.typography.bodySmall, color = ZedColors.Muted)
+
+                        if (activeChat != null) {
+                            Spacer(Modifier.height(14.dp))
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFF1E1E28),
+                                border = BorderStroke(1.dp, Color(0xFF323242)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { vm.openThread(activeChat.thread, activeChat.project) },
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    Icon(Symbols.ChatBubble, contentDescription = null, tint = Color(0xFFA58DFE), modifier = Modifier.size(18.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Active Desktop Chat", style = MaterialTheme.typography.labelSmall, color = Color(0xFFA58DFE))
+                                        Text(
+                                            activeChat.thread.title.ifBlank { "Live Conversation" },
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    SmallButton(
+                                        text = "Continue →",
+                                        onClick = { vm.openThread(activeChat.thread, activeChat.project) },
+                                        tone = ButtonTone.Primary,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
-        item(key = "projects-label") { HomeSectionLabel("Projects") }
+
+        // Hero Agent Quick Launch Options (Replacing recents on the Home Screen)
+        item(key = "options-label") { HomeSectionLabel("Quick Options") }
+        item(key = "options-grid") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // AntiGravity Agent Option Card
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable { vm.createThread(activeProject?.id ?: "default", "antigravity") },
+                    color = Color(0xFF1E1E28),
+                    border = BorderStroke(1.dp, Color(0xFF7C5CFC).copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Symbols.Sparkles, contentDescription = null, tint = Color(0xFFA58DFE), modifier = Modifier.size(24.dp))
+                            Text("Google AI", style = MaterialTheme.typography.labelSmall, color = Color(0xFFA58DFE))
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Text("AntiGravity", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                        Spacer(Modifier.height(2.dp))
+                        Text("Autonomous edits & reasoning", style = MaterialTheme.typography.bodySmall, color = ZedColors.Muted, maxLines = 2)
+                        Spacer(Modifier.height(12.dp))
+                        SmallButton(
+                            text = "+ New Chat",
+                            onClick = { vm.createThread(activeProject?.id ?: "default", "antigravity") },
+                            tone = ButtonTone.Primary,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+
+                // Pi Agent Option Card
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable { vm.createThread(activeProject?.id ?: "default", "pi") },
+                    color = Color(0xFF18202A),
+                    border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Symbols.Bot, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(24.dp))
+                            Text("YOLO Mode", style = MaterialTheme.typography.labelSmall, color = Color(0xFF38BDF8))
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Text("Pi Agent", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                        Spacer(Modifier.height(2.dp))
+                        Text("Instant lightweight coding assistant", style = MaterialTheme.typography.bodySmall, color = ZedColors.Muted, maxLines = 2)
+                        Spacer(Modifier.height(12.dp))
+                        SmallButton(
+                            text = "+ New Chat",
+                            onClick = { vm.createThread(activeProject?.id ?: "default", "pi") },
+                            tone = ButtonTone.Secondary,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+        }
+
+        // Quick Workspace Tools
+        item(key = "tools-label") { HomeSectionLabel("Workspace Tools") }
+        item(key = "tools-row") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // Terminal Button
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { vm.showTerminal() },
+                    color = Color(0xFF16161B),
+                    border = BorderStroke(1.dp, Color(0xFF262632)),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Symbols.Terminal, contentDescription = null, tint = Color(0xFFF3F3F7), modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.height(6.dp))
+                        Text("Terminal", style = MaterialTheme.typography.labelMedium, color = Color(0xFFF3F3F7))
+                    }
+                }
+                // Files Button
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { vm.showFiles() },
+                    color = Color(0xFF16161B),
+                    border = BorderStroke(1.dp, Color(0xFF262632)),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Symbols.Folder, contentDescription = null, tint = Color(0xFFF3F3F7), modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.height(6.dp))
+                        Text("Files & Trust", style = MaterialTheme.typography.labelMedium, color = Color(0xFFF3F3F7))
+                    }
+                }
+                // Git Button
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { vm.showGit() },
+                    color = Color(0xFF16161B),
+                    border = BorderStroke(1.dp, Color(0xFF262632)),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.AccountTree, contentDescription = null, tint = Color(0xFFF3F3F7), modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.height(6.dp))
+                        Text("Git Status", style = MaterialTheme.typography.labelMedium, color = Color(0xFFF3F3F7))
+                    }
+                }
+            }
+        }
+
+        // Open Projects & Workspaces
+        item(key = "projects-label") { HomeSectionLabel("Open Windows & Projects") }
         if (state.projects.isEmpty()) {
             item(key = "empty") {
                 MascotMessage(
@@ -575,50 +769,60 @@ internal fun ThreadRow(
     }
 }
 
-/** Asks only what is ambiguous: the project when several are open, then the agent. */
+/** Prompts the user to choose between AntiGravity and Pi agent for a new thread. */
 @Composable
 internal fun NewThreadSheet(state: MobileState, request: NewThreadRequest, vm: ZedViewModel) {
-    val project = request.projectId?.let { id -> state.projects.firstOrNull { it.id == id } }
-    QuietSheet(onDismiss = vm::dismissNewThread, title = "New thread") {
-        if (project == null) {
+    val project = if (request.projectId != null) {
+        state.projects.firstOrNull { it.id == request.projectId }
+    } else {
+        state.projects.firstOrNull { it.isOpen } ?: state.projects.firstOrNull()
+    }
+
+    if (project == null) {
+        QuietSheet(onDismiss = vm::dismissNewThread, title = "Start New Thread") {
             Text(
-                "Choose a project",
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+                "No open workspace available to start a thread.",
+                modifier = Modifier.padding(20.dp),
                 style = MaterialTheme.typography.bodyMedium,
                 color = ZedColors.Muted,
             )
-            val open = state.projects.filter { it.isOpen }
-            if (open.isEmpty()) {
-                InlineNotice("Open a project in Zed on your desktop first.")
-            }
-            open.forEach { candidate ->
-                SheetChoice(
-                    icon = if (candidate.kind != PROJECT_KIND_LOCAL) Symbols.Dns else Symbols.Folder,
-                    title = candidate.name,
-                    subtitle = shortPath(candidate.path),
-                    onClick = { vm.startNewThread(candidate.id) },
-                )
-            }
-        } else {
-            Text(
-                "Choose an agent for ${project.name}",
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                color = ZedColors.Muted,
-            )
-            val agents = state.projectAgents[project.id].orEmpty().ifEmpty {
-                listOf(AgentInfo("Zed Agent", "Zed Agent", isNative = true))
-            }
-            agents.forEach { agent ->
-                SheetChoice(
-                    icon = if (agent.isNative) Symbols.Sparkles else Symbols.Bot,
-                    title = agent.name,
-                    subtitle = if (agent.isNative) "Built into Zed" else "External agent · signs in on desktop",
-                    onClick = { vm.createThread(project.id, if (agent.isNative) null else agent.id) },
-                    description = "Start a thread with ${agent.name}",
-                )
-            }
         }
+        return
+    }
+
+    QuietSheet(onDismiss = vm::dismissNewThread, title = "Start New Thread") {
+        Text(
+            "Select an agent for ${project.name}:",
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = ZedColors.Muted,
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        SheetChoice(
+            icon = Symbols.Sparkles,
+            title = "AntiGravity",
+            subtitle = "Google AI · Full workspace reasoning, edits & YOLO terminal",
+            onClick = {
+                vm.createThread(project.id, "antigravity")
+                vm.dismissNewThread()
+            },
+            description = "Start a thread with AntiGravity Agent",
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        SheetChoice(
+            icon = Symbols.Bot,
+            title = "Pi",
+            subtitle = "Fast lightweight coding agent in YOLO mode",
+            onClick = {
+                vm.createThread(project.id, "pi")
+                vm.dismissNewThread()
+            },
+            description = "Start a thread with Pi Agent",
+        )
     }
 }
 
@@ -812,12 +1016,15 @@ internal fun ChangesScreen(state: MobileState, vm: ZedViewModel) {
     confirmReject?.let { request ->
         AlertDialog(
             onDismissRequest = { confirmReject = null },
-            containerColor = ZedColors.Surface,
+            containerColor = Color(0xFF1E1E26),
+            titleContentColor = Color(0xFFF3F3F7),
+            textContentColor = Color(0xFFF3F3F7),
             shape = MaterialTheme.shapes.large,
             title = {
                 Text(
                     if (request.paths == null) "Reject all edits?" else "Reject edits to ${request.paths.first().substringAfterLast('/')}?",
                     style = MaterialTheme.typography.titleLarge,
+                    color = Color(0xFFF3F3F7),
                 )
             },
             text = {

@@ -89,3 +89,27 @@ Tasker or MacroDroid can broadcast intents with extras to control the desktop ag
 ## 4. Multi-Workspace Tab Switching
 - Tab bar at the top of the mobile screen allowing instantaneous switching between active open Zed workspaces on the host machine.
 - Per-workspace thread filters and split terminal instances.
+
+---
+
+## 5. Queued Messages Engine & Mid-Turn Steerability (Next Version)
+
+When the user types and sends a prompt while an AI agent is actively executing a turn (thinking, invoking tools, or running commands), the message will be queued safely rather than rejected or lost.
+
+### Architecture & Capabilities:
+- **FIFO Message Queue**: In-memory and persisted queue in `SessionManager` / `MessageRouter` per thread (`VecDeque<QueuedPrompt>`).
+- **Mid-Turn Steerability**:
+  - If the agent supports steering/interrupts, high-priority queued prompts can be injected as mid-turn steer directives.
+  - Otherwise, queued messages are automatically dispatched as the next turn immediately when the active turn completes.
+- **Mobile Chat UI Queue Bar**:
+  - Displays a clean dark floating banner: `"1 message queued · will send when turn finishes"`.
+  - Allows tapping to view, edit, reorder, or cancel queued prompts before dispatch.
+- **Daemon Gateway API**:
+  - `GET /v2/threads/:id/queue` - Retrieve pending prompts for a thread.
+  - `POST /v2/threads/:id/queue` - Enqueue a message while agent is busy.
+  - `PUT /v2/threads/:id/queue/:queued_id` - Edit prompt text or parameters of an unconsumed queued item.
+  - `PUT /v2/threads/:id/queue/order` - Reorder the pending queue atomically by submitting ordered IDs `[id1, id2, ...]`.
+  - `DELETE /v2/threads/:id/queue/:queued_id` - Remove or abort a queued prompt.
+  - WebSocket event `thread.queue_changed` emitted to mobile clients whenever items are queued, reordered, edited, or consumed.
+
+

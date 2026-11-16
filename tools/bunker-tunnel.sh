@@ -404,14 +404,23 @@ fi
 
 # Load or generate persistent session keys
 if [[ -f "${CONFIG_FILE}" ]] && [[ "$RESET_KEYS" = false ]]; then
-    TOPIC=$(python3 -c "import json; print(json.load(open('${CONFIG_FILE}'))['ntfy_topic'])")
-    KEY_B64=$(python3 -c "import json; print(json.load(open('${CONFIG_FILE}'))['key'])")
-    TOKEN=$(python3 -c "import json; print(json.load(open('${CONFIG_FILE}'))['token'])")
+    TOPIC=$(python3 -c "import json; d = json.load(open('${CONFIG_FILE}')); print(d.get('ntfy_topic', ''))")
+    KEY_B64=$(python3 -c "import json; d = json.load(open('${CONFIG_FILE}')); print(d.get('key') or d.get('bunker_key', ''))")
+    TOKEN=$(python3 -c "import json; d = json.load(open('${CONFIG_FILE}')); print(d.get('token') or d.get('daemon_token', ''))")
     if [[ "$DAEMON_MODE" = false ]]; then
         echo -e "${GREEN}[✓] Loaded persistent device binding:${NC}"
         echo -e "    Channel Topic: ${CYAN}${TOPIC}${NC}"
         echo -e "    Target Port:   ${CYAN}${LOCAL_PORT}${NC}"
         echo -e "    AES-256 Key:   ${CYAN}[REDACTED]${NC}\n"
+
+        # Check if the active daemon running on the port is an outdated instance
+        if command -v curl &>/dev/null; then
+            CHECK_RESP=$(curl -s --connect-timeout 1 -m 2 -H "Authorization: Bearer ${TOKEN}" "http://127.0.0.1:${LOCAL_PORT}/v2/projects/default/threads" 2>/dev/null || echo "")
+            if echo "$CHECK_RESP" | grep -q "thread-1794814517197"; then
+                echo -e "${YELLOW}[!] WARNING: An outdated daemon (v0.1.2) is still held in memory by Zed Editor.${NC}"
+                echo -e "${YELLOW}[!] Please close and reopen Zed Editor on your laptop to load the updated daemon!${NC}\n"
+            fi
+        fi
     fi
 else
     # Cryptographically random topic (48 hex chars = 192 bits of entropy)

@@ -276,6 +276,12 @@ fun ZedApp(
                         vm.openThread(recent.thread, recent.project)
                     }
                 },
+                onNewChat = {
+                    drawerScope.launch {
+                        drawerState.close()
+                        vm.startNewThread()
+                    }
+                },
                 onReconnect = { vm.reconnect() },
             )
         },

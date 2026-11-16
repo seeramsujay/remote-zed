@@ -786,31 +786,72 @@ impl WebSocketGateway {
                 } else {
                     ("AntiGravity Agent", "New Conversation")
                 };
-                let thread_id = format!("thread-{}", uuid::Uuid::new_v4());
-                let new_thread = CustomThread {
-                    id: thread_id.clone(),
-                    title: title.to_string(),
-                    status: "ready".to_string(),
-                    agent_id: agent_id.clone(),
-                    mode: "yolo".to_string(),
-                    active_session_id: None,
-                    messages: Vec::new(),
-                    transcript: Vec::new(),
-                };
-                let mut state = thread_state.lock().await;
-                state.custom_threads.push(new_thread);
-                drop(state);
-
-                (200, serde_json::json!({
-                    "id": thread_id,
-                    "title": title,
-                    "status": "ready",
-                    "agent": {
-                        "id": agent_id,
-                        "name": agent_name,
-                        "is_native": false
+                let cwd = terminal.get_cwd().await;
+                let maybe_thread_id = if agent_id == "pi" {
+                    Ok(format!("pi-{}", uuid::Uuid::new_v4()))
+                } else {
+                    // Dispatch session/new with cwd & mcpServers to agy acp child process
+                    let session_params = serde_json::json!({
+                        "cwd": cwd,
+                        "mcpServers": []
+                    });
+                    match router.dispatch_agent_request("session/new", session_params).await {
+                        Ok(res_val) => {
+                            let sid = res_val
+                                .get("result")
+                                .and_then(|r| r.get("sessionId"))
+                                .and_then(|s| s.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            if !sid.is_empty() {
+                                router.set_active_session_id(&sid).await;
+                                let _ = router.send_to_zed_stdout(&res_val.to_string()).await;
+                                Ok(sid)
+                            } else {
+                                let err_msg = res_val
+                                    .get("error")
+                                    .and_then(|e| e.get("message"))
+                                    .and_then(|m| m.as_str())
+                                    .unwrap_or("Failed to initialize session with agent");
+                                Err((502, err_msg.to_string()))
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to dispatch session/new: {}", e);
+                            Err((504, format!("Agent session creation timed out or unavailable: {}", e)))
+                        }
                     }
-                }))
+                };
+
+                match maybe_thread_id {
+                    Ok(thread_id) => {
+                        let new_thread = CustomThread {
+                            id: thread_id.clone(),
+                            title: title.to_string(),
+                            status: "ready".to_string(),
+                            agent_id: agent_id.clone(),
+                            mode: "yolo".to_string(),
+                            active_session_id: Some(thread_id.clone()),
+                            messages: Vec::new(),
+                            transcript: Vec::new(),
+                        };
+                        let mut state = thread_state.lock().await;
+                        state.custom_threads.push(new_thread);
+                        drop(state);
+
+                        (200, serde_json::json!({
+                            "id": thread_id,
+                            "title": title,
+                            "status": "ready",
+                            "agent": {
+                                "id": agent_id,
+                                "name": agent_name,
+                                "is_native": false
+                            }
+                        }))
+                    }
+                    Err((code, msg)) => (code, serde_json::json!({ "error": msg })),
+                }
             } else if path.ends_with("/agents") && method == "GET" {
                 (200, serde_json::json!({
                     "agents": [
@@ -1027,7 +1068,28 @@ impl WebSocketGateway {
                                 }]
                             }
                         }).to_string();
-                        let _ = router.handle_mobile_message(&prompt_rpc).await;
+
+                        let handle_res = router.handle_mobile_message(&prompt_rpc).await;
+                        // Only mirror user message notification to Zed stdout if prompt was accepted (not busy or rejected)
+                        if let Some(ref res_str) = handle_res {
+                            if !res_str.contains("\"error\"") {
+                                let zed_user_update = serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "method": "session/update",
+                                    "params": {
+                                        "sessionId": prompt_session_id,
+                                        "update": {
+                                            "sessionUpdate": "user_message_chunk",
+                                            "content": {
+                                                "type": "text",
+                                                "text": text
+                                            }
+                                        }
+                                    }
+                                }).to_string();
+                                let _ = router.send_to_zed_stdout(&zed_user_update).await;
+                            }
+                        }
                     }
                 }
                 (200, serde_json::json!({

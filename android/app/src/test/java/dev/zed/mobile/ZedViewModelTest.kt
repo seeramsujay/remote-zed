@@ -102,16 +102,18 @@ class ZedViewModelTest {
     }
 
     @Test
-    fun `new threads use the built-in agent unless desktop offers external agents`() {
+    fun `new threads prompt for agent selection between antigravity and pi`() {
         runTest(dispatcher) {
             val repo = FakeRepository()
             val vm = ZedViewModel(connect = { _, _ -> repo }, credentialStore = InMemoryCredentialStore())
             vm.pair("https://desktop", "token"); advanceUntilIdle()
             assertTrue(vm.state.value.projectAgents["p"].orEmpty().isEmpty())
-            // With one open project and no external agents, a new thread starts without asking.
+            // Starting a new thread always prompts for agent selection (AntiGravity vs Pi)
             vm.startNewThread(); advanceUntilIdle()
+            assertEquals(NewThreadRequest("p"), vm.state.value.newThread)
+            vm.createThread("p", "antigravity"); advanceUntilIdle()
             assertNull(vm.state.value.newThread)
-            assertEquals(listOf<String?>(null), repo.createdWithAgent)
+            assertEquals(listOf<String?>("antigravity"), repo.createdWithAgent)
 
             vm.back(); advanceUntilIdle()
             repo.agentList = listOf(AgentInfo("Zed Agent", "Zed Agent", true), AgentInfo("claude-acp", "Claude Agent", false))
@@ -123,7 +125,7 @@ class ZedViewModelTest {
             assertNull(vm.state.value.newThread)
             vm.startNewThread(); vm.createThread("p", "claude-acp"); advanceUntilIdle()
             assertNull(vm.state.value.newThread)
-            assertEquals(listOf(null, "claude-acp"), repo.createdWithAgent)
+            assertEquals(listOf("antigravity", "claude-acp"), repo.createdWithAgent)
             assertEquals(Page.CHAT, vm.state.value.page)
             assertEquals("Claude Agent", vm.state.value.selectedThread?.agent?.name)
 
