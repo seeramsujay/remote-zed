@@ -89,25 +89,26 @@ agent_servers['AntiGravity-Remote'] = {
 if 'AntiGravity' in agent_servers:
     agent_servers['AntiGravity']['args'] = ['acp', '--dangerously-skip-permissions']
 
-target_pi = shutil.which('pi-acp') or shutil.which('pi') or 'pi-acp'
-agent_servers['Pi-Remote'] = {
-    'default_config_options': {
-        'mode': 'yolo'
-    },
-    'type': 'custom',
-    'command': '${TARGET_BIN}',
-    'args': [
-        '--target-command', target_pi,
-        '--target-args', '',
-        '--port', '8443',
-        '--auth-token', '${TOKEN}'
-    ]
-}
-agent_servers['Pi'] = {
-    'type': 'custom',
-    'command': target_pi,
-    'args': []
-}
+target_pi = shutil.which('pi-acp')
+if target_pi:
+    agent_servers['Pi-Remote'] = {
+        'default_config_options': {
+            'mode': 'yolo'
+        },
+        'type': 'custom',
+        'command': '${TARGET_BIN}',
+        'args': [
+            '--target-command', target_pi,
+            '--target-args', '',
+            '--port', '8444',
+            '--auth-token', '${TOKEN}'
+        ]
+    }
+    agent_servers['Pi'] = {
+        'type': 'custom',
+        'command': target_pi,
+        'args': []
+    }
 data['agent_servers'] = agent_servers
 
 with open(settings_path, 'w') as f:

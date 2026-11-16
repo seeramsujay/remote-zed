@@ -100,36 +100,29 @@ impl SessionManager {
 
     /// Extracts structured chat messages ({ "role": "user" | "assistant", "text": "..." }) from the latest or specified session log.
     pub async fn get_chat_messages(&self, preferred_session_id: Option<&str>) -> Vec<serde_json::Value> {
-        let session_file = if let Some(id) = preferred_session_id {
+        let file_to_read = if let Some(id) = preferred_session_id {
             let p = self.base_dir.join(format!("{}.jsonl", id));
             if p.exists() {
                 Some(p)
             } else {
-                None
+                return Vec::new();
             }
         } else {
-            None
-        };
-
-        let file_to_read = match session_file {
-            Some(f) => Some(f),
-            None => {
-                let mut latest_file: Option<(PathBuf, std::time::SystemTime)> = None;
-                if let Ok(mut dir_entries) = tokio::fs::read_dir(&self.base_dir).await {
-                    while let Ok(Some(entry)) = dir_entries.next_entry().await {
-                        let path = entry.path();
-                        if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                            if let Ok(metadata) = entry.metadata().await {
-                                let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                                if latest_file.as_ref().map_or(true, |(_, m)| modified > *m) {
-                                    latest_file = Some((path, modified));
-                                }
+            let mut latest_file: Option<(PathBuf, std::time::SystemTime)> = None;
+            if let Ok(mut dir_entries) = tokio::fs::read_dir(&self.base_dir).await {
+                while let Ok(Some(entry)) = dir_entries.next_entry().await {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                        if let Ok(metadata) = entry.metadata().await {
+                            let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                            if latest_file.as_ref().map_or(true, |(_, m)| modified > *m) {
+                                latest_file = Some((path, modified));
                             }
                         }
                     }
                 }
-                latest_file.map(|(p, _)| p)
             }
+            latest_file.map(|(p, _)| p)
         };
 
         let path = match file_to_read {

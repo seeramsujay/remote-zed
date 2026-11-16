@@ -359,7 +359,7 @@ class ZedViewModel(
                     val freshOrigin = BunkerTunnel.resolveTunnelUrl(
                         BunkerConfig(credential.bunkerTopic, credential.bunkerKey, credential.credential)
                     )
-                    if (freshOrigin.isNotBlank() && freshOrigin != credential.origin) {
+                    if (freshOrigin.isNotBlank()) {
                         val refreshed = credential.copy(origin = freshOrigin)
                         val retryCandidate = connectV2(refreshed)
                         retryCandidate.checkStatus()
@@ -527,7 +527,8 @@ class ZedViewModel(
                         val freshOrigin = BunkerTunnel.resolveTunnelUrl(
                             BunkerConfig(cred.bunkerTopic, cred.bunkerKey, cred.credential)
                         )
-                        if (freshOrigin.isNotBlank() && freshOrigin != cred.origin) {
+                        if (freshOrigin.isNotBlank()) {
+                            if (activeV2Credential == null || repository !== repo) return@launch
                             val refreshed = cred.copy(origin = freshOrigin)
                             val retryCandidate = connectV2(refreshed)
                             val freshProjects = retryCandidate.projects()
@@ -983,6 +984,10 @@ class ZedViewModel(
                             toast = "Connected to Zed host!",
                         )
                         startThreadLoad(candidate, projects)
+                        if (mutable.value.page == Page.GIT) {
+                            loadGitStatus()
+                            loadGitLog()
+                        }
                         return@launch
                     }
                 } catch (e: GatewayAuthenticationException) {
@@ -1007,6 +1012,10 @@ class ZedViewModel(
                         toast = "Connected to Zed host!",
                     )
                     startThreadLoad(repo, projects)
+                    if (mutable.value.page == Page.GIT) {
+                        loadGitStatus()
+                        loadGitLog()
+                    }
                 } catch (e: GatewayAuthenticationException) {
                     mutable.value = mutable.value.copy(busy = false)
                     handleRevokedCredential()
@@ -1031,8 +1040,10 @@ class ZedViewModel(
             try {
                 val st = repo.gitStatus()
                 val br = repo.gitBranches()
+                if (repository !== repo) return@launch
                 mutable.value = mutable.value.copy(gitStatus = st, gitBranches = br, gitLoading = false)
             } catch (e: Exception) {
+                if (repository !== repo) return@launch
                 mutable.value = mutable.value.copy(gitLoading = false, toast = "Git status error: ${e.message}")
             }
         }
@@ -1044,9 +1055,35 @@ class ZedViewModel(
             mutable.value = mutable.value.copy(gitLoading = true)
             try {
                 val log = repo.gitLogGraph()
+                if (repository !== repo) return@launch
                 mutable.value = mutable.value.copy(gitCommits = log, gitLoading = false)
             } catch (e: Exception) {
+                if (repository !== repo) return@launch
                 mutable.value = mutable.value.copy(gitLoading = false, toast = "Git log error: ${e.message}")
+            }
+        }
+    }
+
+    fun gitFetch() {
+        val repo = repository ?: return
+        viewModelScope.launch {
+            mutable.value = mutable.value.copy(gitLoading = true)
+            try {
+                val output = repo.gitFetch()
+                val st = repo.gitStatus()
+                val br = repo.gitBranches()
+                val log = repo.gitLogGraph()
+                if (repository !== repo) return@launch
+                mutable.value = mutable.value.copy(
+                    gitStatus = st,
+                    gitBranches = br,
+                    gitCommits = log,
+                    gitLoading = false,
+                    toast = if (output.isNotBlank()) "Fetched: ${output.trim()}" else "Fetch complete.",
+                )
+            } catch (e: Exception) {
+                if (repository !== repo) return@launch
+                mutable.value = mutable.value.copy(gitLoading = false, toast = "Git fetch error: ${e.message}")
             }
         }
     }
@@ -1056,8 +1093,10 @@ class ZedViewModel(
         viewModelScope.launch {
             try {
                 val branches = repo.gitBranches()
+                if (repository !== repo) return@launch
                 mutable.value = mutable.value.copy(gitBranches = branches)
             } catch (e: Exception) {
+                if (repository !== repo) return@launch
                 mutable.value = mutable.value.copy(toast = "Git branches error: ${e.message}")
             }
         }

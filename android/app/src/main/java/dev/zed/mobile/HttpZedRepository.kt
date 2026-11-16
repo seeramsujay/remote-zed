@@ -440,6 +440,15 @@ class HttpZedRepository private constructor(
         request("POST", listOf("git", "push"), body)
     }
 
+    override suspend fun gitFetch(remote: String?, prune: Boolean): String {
+        val body = JsonObject().apply {
+            remote?.let { addProperty("remote", it) }
+            addProperty("prune", prune)
+        }
+        val res = request("POST", listOf("git", "fetch"), body)
+        return res.get("output")?.asString ?: "Fetch complete."
+    }
+
     override suspend fun gitBranches(): List<String> {
         val res = request("GET", listOf("git", "branches"))
         return res.getAsJsonArray("branches")?.mapNotNull { it.asString } ?: emptyList()
@@ -698,19 +707,33 @@ private fun JsonObject.optionalString(key: String): String? {
 
 private fun JsonObject.number(key: String): Int {
     val value = get(key)
-    if (value == null || !value.isJsonPrimitive || !value.asJsonPrimitive.isNumber) {
+    if (value == null || !value.isJsonPrimitive) {
         throw GatewayException("Invalid desktop integer '$key'.")
     }
-    return value.asString.toIntOrNull() ?: throw GatewayException("Invalid desktop integer '$key'.")
+    val prim = value.asJsonPrimitive
+    return if (prim.isNumber) {
+        prim.asInt
+    } else if (prim.isString) {
+        prim.asString.toIntOrNull() ?: throw GatewayException("Invalid desktop integer '$key'.")
+    } else {
+        throw GatewayException("Invalid desktop integer '$key'.")
+    }
 }
 
 private fun JsonObject.optionalNumber(key: String): Int? {
     val value = get(key) ?: return null
     if (value.isJsonNull) return null
-    if (!value.isJsonPrimitive || !value.asJsonPrimitive.isNumber) {
+    if (!value.isJsonPrimitive) {
         throw GatewayException("Invalid desktop integer '$key'.")
     }
-    return value.asString.toIntOrNull() ?: throw GatewayException("Invalid desktop integer '$key'.")
+    val prim = value.asJsonPrimitive
+    return if (prim.isNumber) {
+        prim.asInt
+    } else if (prim.isString) {
+        prim.asString.toIntOrNull()
+    } else {
+        throw GatewayException("Invalid desktop integer '$key'.")
+    }
 }
 
 private fun JsonObject.bool(key: String): Boolean {

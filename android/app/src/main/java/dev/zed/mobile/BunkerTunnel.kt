@@ -130,10 +130,14 @@ object BunkerTunnel {
      * Base64( 12-byte IV + Ciphertext + 16-byte Tag ) or Hex( IV + Ciphertext + Tag ).
      */
     fun decryptAesGcm(encryptedPayload: String, base64Key: String): String {
-        val keyBytes = try {
-            Base64.getDecoder().decode(base64Key)
-        } catch (_: Exception) {
-            Base64.getUrlDecoder().decode(base64Key)
+        val keyBytes = if (base64Key.matches(Regex("^[0-9a-fA-F]{64}$"))) {
+            base64Key.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        } else {
+            try {
+                Base64.getDecoder().decode(base64Key)
+            } catch (_: Exception) {
+                Base64.getUrlDecoder().decode(base64Key)
+            }
         }
         require(keyBytes.size == 32) { "AES-256 key must be exactly 32 bytes (got ${keyBytes.size})." }
 

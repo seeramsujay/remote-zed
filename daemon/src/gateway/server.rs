@@ -609,10 +609,40 @@ impl WebSocketGateway {
         thread_state: Arc<tokio::sync::Mutex<ThreadState>>,
     ) -> Result<()> {
         let mut buffer = vec![0u8; 16384];
-        let bytes_read = stream.read(&mut buffer).await.unwrap_or(0);
+        let mut bytes_read = stream.read(&mut buffer).await.unwrap_or(0);
         if bytes_read == 0 {
             return Ok(());
         }
+
+        // Ensure full body is read if Content-Length header is present
+        let mut initial_req = String::from_utf8_lossy(&buffer[..bytes_read]);
+        let mut content_length = 0usize;
+        for line in initial_req.lines() {
+            if line.to_lowercase().starts_with("content-length:") {
+                if let Some(val) = line.split(':').nth(1) {
+                    content_length = val.trim().parse::<usize>().unwrap_or(0);
+                }
+                break;
+            }
+        }
+
+        let body_pos = initial_req.find("\r\n\r\n").map(|p| p + 4)
+            .or_else(|| initial_req.find("\n\n").map(|p| p + 2));
+
+        if let Some(start) = body_pos {
+            let mut current_body_len = bytes_read.saturating_sub(start);
+            while current_body_len < content_length && bytes_read < 10 * 1024 * 1024 {
+                let mut chunk = vec![0u8; 16384];
+                let n = stream.read(&mut chunk).await.unwrap_or(0);
+                if n == 0 {
+                    break;
+                }
+                buffer.extend_from_slice(&chunk[..n]);
+                bytes_read += n;
+                current_body_len += n;
+            }
+        }
+
         let request_str = String::from_utf8_lossy(&buffer[..bytes_read]);
         let mut lines = request_str.lines();
         let request_line = lines.next().unwrap_or("");
@@ -1201,6 +1231,15 @@ impl WebSocketGateway {
                     let branch = body_json.get("branch").and_then(|v| v.as_str());
                     match git.push(remote, branch).await {
                         Ok(out) => (200, serde_json::json!({ "output": out })),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("POST", "/v2/git/fetch") => {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let remote = body_json.get("remote").and_then(|v| v.as_str());
+                    let prune = body_json.get("prune").and_then(|v| v.as_bool()).unwrap_or(true);
+                    match git.fetch(remote, prune).await {
+                        Ok(out) => (200, serde_json::json!({ "status": "ok", "output": out })),
                         Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
                     }
                 }

@@ -43,4 +43,16 @@ class BunkerTunnelTest {
 
         assertEquals(plaintext, decrypted)
     }
+
+    @Test
+    fun `decrypt AES-GCM with 64-char hex key`() {
+        val keyBytes = ByteArray(32) { it.toByte() }
+        val hexKey = keyBytes.joinToString("") { "%02x".format(it) }
+        val plaintext = "tcp://kdtgg-202-164-151-178.run.pinggy-free.link:38883"
+
+        val encrypted = BunkerTunnel.encryptAesGcm(plaintext, keyBytes)
+        val decrypted = BunkerTunnel.decryptAesGcm(encrypted, hexKey)
+
+        assertEquals(plaintext, decrypted)
+    }
 }

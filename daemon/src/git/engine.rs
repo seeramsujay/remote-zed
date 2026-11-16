@@ -171,11 +171,25 @@ impl GitEngine {
 
         let is_clean = files.is_empty();
 
+        let (ahead, behind) = match self.run_git(&["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]).await {
+            Ok(counts) => {
+                let parts: Vec<&str> = counts.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    let a = parts[0].parse::<usize>().unwrap_or(0);
+                    let b = parts[1].parse::<usize>().unwrap_or(0);
+                    (a, b)
+                } else {
+                    (0, 0)
+                }
+            }
+            Err(_) => (0, 0),
+        };
+
         Ok(GitStatusResult {
             branch,
             clean: is_clean,
-            ahead: 0,
-            behind: 0,
+            ahead,
+            behind,
             files,
         })
     }
@@ -259,6 +273,23 @@ impl GitEngine {
         Ok(out)
     }
 
+    /// Fetches latest branches, tags, and commits from the remote repository.
+    pub async fn fetch(&self, remote: Option<&str>, prune: bool) -> Result<String> {
+        let _guard = self.mutation_lock.lock().await;
+        let mut args = vec!["fetch"];
+        if let Some(r) = remote {
+            args.push(r);
+        } else {
+            args.push("--all");
+        }
+        if prune {
+            args.push("--prune");
+        }
+        info!("Fetching from remote with args {:?}", args);
+        let out = self.run_git(&args).await?;
+        Ok(out)
+    }
+
     /// Unstages specific files (`git restore --staged <paths>` or `git rm --cached` if no HEAD yet).
     pub async fn unstage(&self, paths: &[String]) -> Result<()> {
         let _guard = self.mutation_lock.lock().await;
@@ -299,22 +330,22 @@ impl GitEngine {
             if has_local {
                 let out = match self.run_git(&["switch", local_name]).await {
                     Ok(o) => o,
-                    Err(_) => self.run_git(&["checkout", local_name, "--"]).await?,
+                    Err(_) => self.run_git(&["checkout", local_name]).await?,
                 };
                 return Ok(out);
             } else {
                 let out = match self.run_git(&["switch", "-c", local_name, "--track", clean_branch]).await {
                     Ok(o) => o,
-                    Err(_) => self.run_git(&["checkout", "-b", local_name, "--track", clean_branch, "--"]).await?,
+                    Err(_) => self.run_git(&["checkout", "-b", local_name, "--track", clean_branch]).await?,
                 };
                 return Ok(out);
             }
         }
 
-        // Branch-only switch with path ambiguity guard
+        // Branch-only switch
         let out = match self.run_git(&["switch", clean_branch]).await {
             Ok(o) => o,
-            Err(_) => self.run_git(&["checkout", clean_branch, "--"]).await?,
+            Err(_) => self.run_git(&["checkout", clean_branch]).await?,
         };
         Ok(out)
     }

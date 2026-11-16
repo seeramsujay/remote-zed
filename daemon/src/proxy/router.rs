@@ -18,6 +18,7 @@ pub struct PendingPermission {
     pub tool_name: String,
     pub title: String,
     pub raw_input: serde_json::Value,
+    pub options: Vec<serde_json::Value>,
     pub request_id: RequestId,
 }
 
@@ -117,7 +118,7 @@ impl MessageRouter {
     pub async fn resolve_approval(&self, tool_call_id: &str, option_id: &str) -> bool {
         let mut perms = self.pending_permissions.lock().await;
         let found_key = perms.iter().find_map(|(k, v)| {
-            if v.tool_call_id == tool_call_id || k == tool_call_id {
+            if v.tool_call_id == tool_call_id || k == tool_call_id || k.ends_with(&format!(":{}", tool_call_id)) {
                 Some(k.clone())
             } else {
                 None
@@ -126,9 +127,10 @@ impl MessageRouter {
 
         if let Some(key) = found_key {
             if let Some(pending) = perms.remove(&key) {
+                let is_cancel = option_id == "cancel";
                 let is_allow = !option_id.starts_with("deny")
                     && !option_id.starts_with("reject")
-                    && option_id != "cancel";
+                    && !is_cancel;
                 let decision_str = if is_allow { "approved" } else { "rejected" };
 
                 info!(
@@ -136,14 +138,46 @@ impl MessageRouter {
                     pending.tool_call_id, pending.tool_name, decision_str
                 );
 
+                let outcome = if is_cancel {
+                    serde_json::json!({ "outcome": "cancelled" })
+                } else if is_allow {
+                    let matched_id = pending.options.iter()
+                        .find(|o| o.get("optionId").and_then(|v| v.as_str()) == Some(option_id))
+                        .and_then(|o| o.get("optionId").and_then(|v| v.as_str()))
+                        .or_else(|| {
+                            pending.options.iter()
+                                .find(|o| {
+                                    let opt = o.get("optionId").and_then(|v| v.as_str()).unwrap_or("");
+                                    let kind = o.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+                                    opt.contains("allow") || kind.contains("allow")
+                                })
+                                .and_then(|o| o.get("optionId").and_then(|v| v.as_str()))
+                        })
+                        .unwrap_or("allow_once");
+                    serde_json::json!({ "outcome": "selected", "optionId": matched_id })
+                } else {
+                    let matched_id = pending.options.iter()
+                        .find(|o| o.get("optionId").and_then(|v| v.as_str()) == Some(option_id))
+                        .and_then(|o| o.get("optionId").and_then(|v| v.as_str()))
+                        .or_else(|| {
+                            pending.options.iter()
+                                .find(|o| {
+                                    let opt = o.get("optionId").and_then(|v| v.as_str()).unwrap_or("");
+                                    let kind = o.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+                                    opt.contains("reject") || opt.contains("deny") || kind.contains("reject") || kind.contains("deny")
+                                })
+                                .and_then(|o| o.get("optionId").and_then(|v| v.as_str()))
+                        })
+                        .unwrap_or("reject_once");
+                    serde_json::json!({ "outcome": "selected", "optionId": matched_id })
+                };
+
                 let resp_frame = serde_json::json!({
                     "jsonrpc": "2.0",
                     "id": pending.request_id,
                     "result": {
                         "decision": decision_str,
-                        "outcome": {
-                            "outcome": decision_str
-                        }
+                        "outcome": outcome
                     }
                 })
                 .to_string();
@@ -276,6 +310,12 @@ impl MessageRouter {
                             .cloned()
                             .unwrap_or(serde_json::Value::Null);
 
+                        let options: Vec<serde_json::Value> = params
+                            .get("options")
+                            .and_then(|o| o.as_array())
+                            .cloned()
+                            .unwrap_or_default();
+
                         let mode = self.current_mode.read().await.clone();
                         if mode == "yolo" {
                             info!(
@@ -283,13 +323,24 @@ impl MessageRouter {
                                 req.id, tool_name, tool_call_id, session_id
                             );
 
+                            let default_allow_option = options
+                                .iter()
+                                .find(|o| {
+                                    let opt_id = o.get("optionId").and_then(|v| v.as_str()).unwrap_or("");
+                                    let kind = o.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+                                    opt_id.contains("allow") || kind.contains("allow")
+                                })
+                                .and_then(|o| o.get("optionId").and_then(|v| v.as_str()))
+                                .unwrap_or("allow_once");
+
                             let approval_reply = serde_json::json!({
                                 "jsonrpc": "2.0",
                                 "id": req.id,
                                 "result": {
                                     "decision": "approved",
                                     "outcome": {
-                                        "outcome": "approved"
+                                        "outcome": "selected",
+                                        "optionId": default_allow_option
                                     }
                                 }
                             })
@@ -320,15 +371,17 @@ impl MessageRouter {
                             return;
                         }
 
+                        let scoped_key = format!("{}:{}", session_id, tool_call_id);
                         let mut perms = self.pending_permissions.lock().await;
                         perms.insert(
-                            tool_call_id.clone(),
+                            scoped_key,
                             PendingPermission {
                                 session_id: session_id.clone(),
                                 tool_call_id,
                                 tool_name,
                                 title,
                                 raw_input,
+                                options,
                                 request_id: req.id.clone(),
                             },
                         );
