@@ -774,7 +774,7 @@ internal fun NewThreadSheet(state: MobileState, request: NewThreadRequest, vm: Z
     val project = request.projectId?.let { id -> state.projects.firstOrNull { it.id == id } }
         ?: state.projects.firstOrNull { it.isOpen }
         ?: state.projects.firstOrNull()
-        ?: Project("default", "remote-zed", "/home/suzaykid/Projects/remote-zed", true, false, PROJECT_KIND_LOCAL)
+        ?: Project(id = "default", name = "remote-zed", path = "/home/suzaykid/Projects/remote-zed", isOpen = true, kind = PROJECT_KIND_LOCAL)
 
     QuietSheet(onDismiss = vm::dismissNewThread, title = "Start New Thread") {
         Text(
