@@ -10,7 +10,7 @@
 [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack_Compose_Material_3-4285F4?logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
 [![Flutter](https://img.shields.io/badge/UI-Flutter_3-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
 [![Zed Compatible](https://img.shields.io/badge/Editor-Zed_Official-087EA4?logo=rust&logoColor=white)](https://zed.dev)
-[![Tunnel Security](https://img.shields.io/badge/Tunnel-AES--256--GCM_%2B_SSH_443-purple?logo=wireguard&logoColor=white)](#bunker-tunnel--firewall-bypass)
+[![Tunnel Security](https://img.shields.io/badge/Tunnel-AES--256--GCM_%2B_SSH_443-purple?logo=wireguard&logoColor=white)](#bunker-tunnel-firewall-bypass)
 
 <br/>
 
@@ -20,11 +20,11 @@ curl -fsSL https://raw.githubusercontent.com/seeramsujay/remote-zed/main/install
 
 [Features](#key-features) •
 [Quick Start](#quick-start) •
-[Mobile Apps](#mobile-app-setup-android--ios) •
-[Bunker Tunnel](#bunker-tunnel--firewall-bypass) •
+[Mobile Apps](#mobile-app-setup-android-ios) •
+[Bunker Tunnel](#bunker-tunnel-firewall-bypass) •
 [Desktop Integration](#zero-rebuild-integration-with-official-zed) •
 [Architecture](#architecture) •
-[Releases](#releases--cloud-builds)
+[Releases](#releases-cloud-builds)
 
 </div>
 
@@ -136,7 +136,6 @@ zed-tunnel --update           # Update Zed Remote to latest release
 
 ---
 
-<a id="mobile-app-setup-android--ios"></a>
 ### 📱 Mobile App Setup (Android & iOS)
 
 Choose the client that fits your workflow:
@@ -150,7 +149,6 @@ Choose the client that fits your workflow:
 
 ---
 
-<a id="bunker-tunnel--firewall-bypass"></a>
 ## 🏰 Bunker Tunnel & Firewall Bypass
 
 Standard mesh overlays like Tailscale or WireGuard use UDP (port 41641), which enterprise networks, university hostels, and Fortinet egress firewalls routinely block or throttle via Deep Packet Inspection (DPI).
@@ -187,7 +185,6 @@ Symlinks the extension at `extensions/zed-remote` into Zed's dev extension path:
 
 ---
 
-<a id="releases--cloud-builds"></a>
 ## 📦 Releases & Cloud Builds
 
 You don't need to heat up your laptop compiling APKs or IPAs. GitHub Actions automatically builds and publishes releases on GitHub's cloud runners for free:
