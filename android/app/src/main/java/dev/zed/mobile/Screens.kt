@@ -336,7 +336,8 @@ internal fun quietSwitchColors() = SwitchDefaults.colors(
 @Composable
 internal fun HomeScreen(state: MobileState, vm: ZedViewModel) {
     val activeProject = state.projects.firstOrNull { it.isOpen } ?: state.projects.firstOrNull()
-    val activeChat = state.recents.firstOrNull()
+    val activeChat = state.recents.firstOrNull { activeProject != null && it.projectId == activeProject.id }
+        ?: state.recents.firstOrNull()
 
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 4.dp, bottom = 120.dp)) {
         item(key = "desktop") { DesktopCard(state, onReconnect = vm::reconnect) }
@@ -771,10 +772,23 @@ internal fun ThreadRow(
 /** Prompts the user to choose between AntiGravity and Pi agent for a new thread. */
 @Composable
 internal fun NewThreadSheet(state: MobileState, request: NewThreadRequest, vm: ZedViewModel) {
-    val project = request.projectId?.let { id -> state.projects.firstOrNull { it.id == id } }
-        ?: state.projects.firstOrNull { it.isOpen }
-        ?: state.projects.firstOrNull()
-        ?: Project(id = "default", name = "remote-zed", path = "/home/suzaykid/Projects/remote-zed", isOpen = true, kind = PROJECT_KIND_LOCAL)
+    val project = if (request.projectId != null) {
+        state.projects.firstOrNull { it.id == request.projectId }
+    } else {
+        state.projects.firstOrNull { it.isOpen } ?: state.projects.firstOrNull()
+    }
+
+    if (project == null) {
+        QuietSheet(onDismiss = vm::dismissNewThread, title = "Start New Thread") {
+            Text(
+                "No open workspace available to start a thread.",
+                modifier = Modifier.padding(20.dp),
+                style = MaterialTheme.typography.bodyMedium,
+                color = ZedColors.Muted,
+            )
+        }
+        return
+    }
 
     QuietSheet(onDismiss = vm::dismissNewThread, title = "Start New Thread") {
         Text(

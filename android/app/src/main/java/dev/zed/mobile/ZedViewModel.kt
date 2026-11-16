@@ -664,7 +664,15 @@ class ZedViewModel(
         val session = chatEpoch
         viewModelScope.launch {
             try {
-                val thread = repo.createThread(projectId, agentId)
+                val thread = try {
+                    repo.createThread(projectId, agentId)
+                } catch (error: GatewayException) {
+                    if (agentId != null && error.message?.contains("API v2") == true) {
+                        repo.createThread(projectId, null)
+                    } else {
+                        throw error
+                    }
+                }
                 if (isCurrentChat("", session)) {
                     val latest = mutable.value
                     mutable.value = latest.copy(

@@ -678,12 +678,16 @@ impl MessageRouter {
                     }
                     "session/new" => {
                         match self.dispatch_agent_request("session/new", req.params.clone()).await {
-                            Ok(res_val) => {
+                            Ok(mut res_val) => {
                                 if let Some(session_id) = res_val.get("result").and_then(|r| r.get("sessionId")).and_then(|s| s.as_str()) {
                                     self.set_active_session_id(session_id).await;
                                 }
                                 // Also notify Zed's stdout so desktop tracks the new session
                                 let _ = self.send_to_zed_stdout(&res_val.to_string()).await;
+                                // Restore original mobile request ID for correlation
+                                if let Some(obj) = res_val.as_object_mut() {
+                                    obj.insert("id".to_string(), serde_json::to_value(&req.id).unwrap_or(serde_json::Value::Null));
+                                }
                                 Some(res_val.to_string())
                             }
                             Err(e) => Some(

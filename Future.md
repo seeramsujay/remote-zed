@@ -107,6 +107,9 @@ When the user types and sends a prompt while an AI agent is actively executing a
 - **Daemon Gateway API**:
   - `GET /v2/threads/:id/queue` - Retrieve pending prompts for a thread.
   - `POST /v2/threads/:id/queue` - Enqueue a message while agent is busy.
+  - `PUT /v2/threads/:id/queue/:queued_id` - Edit prompt text or parameters of an unconsumed queued item.
+  - `PUT /v2/threads/:id/queue/order` - Reorder the pending queue atomically by submitting ordered IDs `[id1, id2, ...]`.
   - `DELETE /v2/threads/:id/queue/:queued_id` - Remove or abort a queued prompt.
-  - WebSocket event `thread.queue_changed` emitted to mobile clients whenever items are queued or consumed.
+  - WebSocket event `thread.queue_changed` emitted to mobile clients whenever items are queued, reordered, edited, or consumed.
+
 
