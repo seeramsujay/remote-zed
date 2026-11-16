@@ -12,7 +12,7 @@ class QrPairingContractTest {
         val ticket = PairingTicket(
             origin = "https://zed.example:7443",
             ticketId = "ticket-123",
-            secret = "secret-ABC_123",
+            secret = "secret-ABC_123", // gitleaks:allow
         )
 
         val parsed = QrPairingContract.parse(QrPairingContract.encode(ticket, debug = false), debug = false)

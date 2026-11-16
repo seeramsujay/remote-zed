@@ -233,7 +233,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --service)
             manage_service "${2:-status}"
-            shift 2 || shift
             ;;
         -i|--inject)
             INJECT_SCRIPT=""
@@ -420,7 +419,7 @@ while true; do
         kill "${SSH_PID}" 2>/dev/null || true
         wait "${SSH_PID}" 2>/dev/null || true
     fi
-    > "${LOG_FILE}"
+    : > "${LOG_FILE}"
 
     # Try a.pinggy.io first (more reliable thread capacity), fallback to free.pinggy.io
     PINGGY_HOST="a.pinggy.io"

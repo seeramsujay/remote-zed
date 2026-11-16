@@ -10,7 +10,7 @@
 [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack_Compose_Material_3-4285F4?logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
 [![Flutter](https://img.shields.io/badge/UI-Flutter_3-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
 [![Zed Compatible](https://img.shields.io/badge/Editor-Zed_Official-087EA4?logo=rust&logoColor=white)](https://zed.dev)
-[![Tunnel Security](https://img.shields.io/badge/Tunnel-AES--256--GCM_%2B_SSH_443-purple?logo=wireguard&logoColor=white)](#-bunker-tunnel--firewall-bypass)
+[![Tunnel Security](https://img.shields.io/badge/Tunnel-AES--256--GCM_%2B_SSH_443-purple?logo=wireguard&logoColor=white)](#bunker-tunnel--firewall-bypass)
 
 <br/>
 
@@ -18,13 +18,13 @@
 curl -fsSL https://raw.githubusercontent.com/seeramsujay/remote-zed/main/install.sh | bash
 ```
 
-[Features](#-key-features) •
-[Quick Start](#-quick-start) •
-[Mobile Apps](#-mobile-app-setup-android--ios) •
-[Bunker Tunnel](#-bunker-tunnel--firewall-bypass) •
-[Desktop Integration](#-zero-rebuild-integration-with-official-zed) •
-[Architecture](#-architecture) •
-[Releases](#-releases--cloud-builds)
+[Features](#key-features) •
+[Quick Start](#quick-start) •
+[Mobile Apps](#mobile-app-setup-android--ios) •
+[Bunker Tunnel](#bunker-tunnel--firewall-bypass) •
+[Desktop Integration](#zero-rebuild-integration-with-official-zed) •
+[Architecture](#architecture) •
+[Releases](#releases--cloud-builds)
 
 </div>
 

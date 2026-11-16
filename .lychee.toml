@@ -1,0 +1,5 @@
+exclude = [
+  "https?://(www\\.)?(itnext\\.io|apple\\.com|android\\.com|crates\\.io).*",
+]
+max_retries = 3
+timeout = 20

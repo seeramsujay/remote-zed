@@ -1,3 +1,4 @@
+---
 name: Release Build & Publish
 
 on:
@@ -10,6 +11,7 @@ on:
         description: 'Release Tag (e.g. v0.1.0)'
         required: true
         default: 'v0.1.0'
+        type: string
 
 permissions:
   contents: write
