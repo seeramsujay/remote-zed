@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
@@ -40,6 +41,7 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -126,13 +128,24 @@ fun FilesScreen(
     if (showNewFolderDialog) {
         AlertDialog(
             onDismissRequest = { showNewFolderDialog = false },
-            title = { Text("New Directory", style = MaterialTheme.typography.titleMedium) },
+            containerColor = Color(0xFF1E1E26),
+            titleContentColor = Color(0xFFF3F3F7),
+            textContentColor = Color(0xFFF3F3F7),
+            title = { Text("New Directory", style = MaterialTheme.typography.titleMedium, color = Color(0xFFF3F3F7)) },
             text = {
                 OutlinedTextField(
                     value = newFolderName,
                     onValueChange = { newFolderName = it },
-                    label = { Text("Directory Name") },
+                    label = { Text("Directory Name", color = Color(0xFF9E9EAC)) },
                     singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color(0xFFF3F3F7),
+                        unfocusedTextColor = Color(0xFFF3F3F7),
+                        focusedContainerColor = Color(0xFF16161B),
+                        unfocusedContainerColor = Color(0xFF16161B),
+                        focusedBorderColor = Color(0xFFA58DFE),
+                        unfocusedBorderColor = Color(0xFF32323E),
+                    ),
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
@@ -150,13 +163,17 @@ fun FilesScreen(
                             }
                         }
                     },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF7C5CFC),
+                        contentColor = Color.White,
+                    ),
                 ) {
                     Text("Create")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showNewFolderDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", color = Color(0xFF9E9EAC))
                 }
             },
         )

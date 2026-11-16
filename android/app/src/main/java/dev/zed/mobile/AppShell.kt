@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -30,9 +31,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
@@ -430,12 +433,13 @@ private fun ChatSubtitle(state: MobileState) {
     }
 }
 
-/** Claude-style drawer: destinations, then recent threads with their project, then connection. */
+/** Gemini-style navigation drawer: + New Chat at the top, destinations, and organized recent threads. */
 @Composable
 internal fun MobileNavigationDrawer(
     state: MobileState,
     onDestination: (Page) -> Unit,
     onOpenRecent: (RecentThread) -> Unit,
+    onNewChat: () -> Unit = {},
     onReconnect: () -> Unit = {},
 ) {
     ModalDrawerSheet(
@@ -448,34 +452,70 @@ internal fun MobileNavigationDrawer(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
-                modifier = Modifier.padding(start = 24.dp, end = 20.dp, top = 28.dp, bottom = 20.dp),
+                modifier = Modifier.padding(start = 24.dp, end = 20.dp, top = 24.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Mascot(size = 30.dp)
-                Text("Zed", style = MaterialTheme.typography.headlineSmall, color = ZedColors.DarkText)
+                Text("Zed Remote", style = MaterialTheme.typography.headlineSmall, color = ZedColors.DarkText)
             }
-            DrawerItem(Symbols.Projects, "Projects", state.page == Page.PROJECTS) { onDestination(Page.PROJECTS) }
-            DrawerItem(Icons.Default.AccountTree, "Git", state.page == Page.GIT) { onDestination(Page.GIT) }
-            DrawerItem(Symbols.Folder, "Files", state.page == Page.FILES) { onDestination(Page.FILES) }
+
+            // Google Gemini style "+ New chat" pill button at the top
+            FilledTonalButton(
+                onClick = onNewChat,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .height(44.dp),
+                shape = RoundedCornerShape(22.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = Color(0xFF262632),
+                    contentColor = Color(0xFFF3F3F7),
+                ),
+            ) {
+                Icon(Symbols.Add, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color(0xFFA58DFE))
+                Spacer(Modifier.width(8.dp))
+                Text("New chat", style = MaterialTheme.typography.labelLarge)
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            DrawerItem(Symbols.Projects, "Home", state.page == Page.PROJECTS) { onDestination(Page.PROJECTS) }
+            DrawerItem(Symbols.Folder, "Files & Trust", state.page == Page.FILES) { onDestination(Page.FILES) }
             DrawerItem(Symbols.Terminal, "Terminal", state.page == Page.TERMINAL) { onDestination(Page.TERMINAL) }
+            DrawerItem(Icons.Default.AccountTree, "Git Status", state.page == Page.GIT) { onDestination(Page.GIT) }
             DrawerItem(Symbols.Settings, "Settings", state.page == Page.SETTINGS) { onDestination(Page.SETTINGS) }
-            Hairline(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+
+            Hairline(modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp))
+
             val recents = state.recents
-            if (recents.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
                 Text(
-                    "Recents",
-                    modifier = Modifier.padding(start = 24.dp, bottom = 4.dp),
+                    "Recent Chats",
                     style = MaterialTheme.typography.labelMedium,
                     color = ZedColors.DarkMuted,
                 )
+                if (recents.isNotEmpty()) {
+                    Text(
+                        "${recents.size}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF6E6E7C),
+                    )
+                }
             }
+
             LazyColumn(modifier = Modifier.weight(1f)) {
-                items(recents.take(30), key = { it.thread.id }) { recent ->
+                items(recents.take(40), key = { it.thread.id }) { recent ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp)
+                            .padding(horizontal = 10.dp, vertical = 1.dp)
                             .clip(MaterialTheme.shapes.small)
                             .background(if (state.selectedThread?.id == recent.thread.id) ZedColors.Subtle else Color.Transparent)
                             .clickable { onOpenRecent(recent) }
@@ -485,13 +525,13 @@ internal fun MobileNavigationDrawer(
                                     "Open thread ${recent.thread.title.ifBlank { "New thread" }} in ${recent.project.name}"
                             },
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         Icon(
                             Symbols.ChatBubble,
                             contentDescription = null,
-                            tint = ZedColors.DarkMuted,
-                            modifier = Modifier.size(16.dp)
+                            tint = if (state.selectedThread?.id == recent.thread.id) Color(0xFFA58DFE) else ZedColors.DarkMuted,
+                            modifier = Modifier.size(16.dp),
                         )
                         Text(
                             recent.thread.title.ifBlank { "New thread" },
@@ -501,8 +541,7 @@ internal fun MobileNavigationDrawer(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        // A fixed column so every tag starts at the same point, whatever the title length.
-                        Box(modifier = Modifier.width(76.dp)) {
+                        Box(modifier = Modifier.widthIn(max = 76.dp)) {
                             ProjectTag(recent.project.name)
                         }
                     }

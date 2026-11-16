@@ -630,13 +630,8 @@ class ZedViewModel(
      */
     fun startNewThread(projectId: String? = null) {
         val current = mutable.value
-        val target = projectId ?: current.projects.filter { it.isOpen }.singleOrNull()?.id
-        when {
-            target == null -> mutable.value = current.copy(newThread = NewThreadRequest(null))
-            current.projectAgents[target].orEmpty().any { !it.isNative } ->
-                mutable.value = current.copy(newThread = NewThreadRequest(target))
-            else -> createThread(target, null)
-        }
+        val target = projectId ?: current.projects.filter { it.isOpen }.firstOrNull()?.id ?: current.projects.firstOrNull()?.id
+        mutable.value = current.copy(newThread = NewThreadRequest(target))
     }
 
     fun dismissNewThread() {

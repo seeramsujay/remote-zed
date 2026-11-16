@@ -786,14 +786,40 @@ impl WebSocketGateway {
                 } else {
                     ("AntiGravity Agent", "New Conversation")
                 };
-                let thread_id = format!("thread-{}", uuid::Uuid::new_v4());
+                let thread_id = if agent_id == "pi" {
+                    format!("pi-{}", uuid::Uuid::new_v4())
+                } else {
+                    // Dispatch session/new to agy acp child process
+                    match router.dispatch_agent_request("session/new", serde_json::json!({})).await {
+                        Ok(res_val) => {
+                            let sid = res_val
+                                .get("result")
+                                .and_then(|r| r.get("sessionId"))
+                                .and_then(|s| s.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            if !sid.is_empty() {
+                                router.set_active_session_id(&sid).await;
+                                let _ = router.send_to_zed_stdout(&res_val.to_string()).await;
+                                sid
+                            } else {
+                                format!("thread-{}", uuid::Uuid::new_v4())
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to dispatch session/new: {}", e);
+                            format!("thread-{}", uuid::Uuid::new_v4())
+                        }
+                    }
+                };
+
                 let new_thread = CustomThread {
                     id: thread_id.clone(),
                     title: title.to_string(),
                     status: "ready".to_string(),
                     agent_id: agent_id.clone(),
                     mode: "yolo".to_string(),
-                    active_session_id: None,
+                    active_session_id: Some(thread_id.clone()),
                     messages: Vec::new(),
                     transcript: Vec::new(),
                 };
@@ -1027,6 +1053,24 @@ impl WebSocketGateway {
                                 }]
                             }
                         }).to_string();
+
+                        // Mirror user message notification to Zed stdout so desktop immediately shows the prompt
+                        let zed_user_update = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "method": "session/update",
+                            "params": {
+                                "sessionId": prompt_session_id,
+                                "update": {
+                                    "sessionUpdate": "user_message_chunk",
+                                    "content": {
+                                        "type": "text",
+                                        "text": text
+                                    }
+                                }
+                            }
+                        }).to_string();
+                        let _ = router.send_to_zed_stdout(&zed_user_update).await;
+
                         let _ = router.handle_mobile_message(&prompt_rpc).await;
                     }
                 }

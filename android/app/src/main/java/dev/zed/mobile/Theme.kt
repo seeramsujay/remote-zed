@@ -174,8 +174,8 @@ private val LightColorScheme = lightColorScheme(
  */
 @Composable
 fun ZedTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
+    darkTheme: Boolean = true,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current

@@ -1203,8 +1203,8 @@ internal fun QuietSheet(onDismiss: () -> Unit, title: String, content: @Composab
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = ZedColors.Surface,
-        contentColor = ZedColors.Text,
+        containerColor = Color(0xFF1E1E26),
+        contentColor = Color(0xFFF3F3F7),
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
         tonalElevation = 0.dp,
     ) {
