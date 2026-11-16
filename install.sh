@@ -187,7 +187,7 @@ echo -e "${GREEN}${BOLD}========================================================
 echo ""
 echo -e "📱 ${BOLD}Step 1: Download the Mobile App${NC}"
 echo -e "   • Native Jetpack Compose APK: ${CYAN}zed-remote.apk${NC}"
-echo -e "   • Download latest from: ${CYAN}https://github.com/seeramsujay/remote-zed/releases/tag/v0.1.2${NC}"
+echo -e "   • Download latest from: ${CYAN}https://github.com/seeramsujay/remote-zed/releases/latest${NC}"
 echo ""
 echo -e "🏰 ${BOLD}Step 2: Bind Your Phone Once${NC}"
 echo -e "   Run: ${CYAN}zed-tunnel --bind${NC}  (or: ${CYAN}zedt --bind${NC})"
