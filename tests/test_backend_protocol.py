@@ -17,6 +17,7 @@ import hmac
 import json
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
 import unittest
@@ -623,8 +624,9 @@ done
                 text=True,
             )
             # Wait for live line
+            self.assertIsNotNone(p1.stdout)
             while True:
-                line = p1.stdout.readline()
+                line = p1.stdout.readline() if p1.stdout else ""
                 if "Tunnel is LIVE" in line:
                     break
 
@@ -641,7 +643,7 @@ done
             self.assertNotIn("[*] Shutting down pinggy tunnel...", p2.stdout)
 
             # 3. Terminate p1 with SIGINT
-            p1.send_signal(subprocess.signal.SIGINT)
+            p1.send_signal(signal.SIGINT)
             out1, _ = p1.communicate(timeout=3)
             self.assertEqual(p1.returncode, 0)
             self.assertEqual(out1.count("[*] Shutting down pinggy tunnel..."), 1)
@@ -654,11 +656,12 @@ done
                 stderr=subprocess.PIPE,
                 text=True,
             )
+            self.assertIsNotNone(p3.stdout)
             while True:
-                line = p3.stdout.readline()
+                line = p3.stdout.readline() if p3.stdout else ""
                 if "Tunnel is LIVE" in line:
                     break
-            p3.send_signal(subprocess.signal.SIGINT)
+            p3.send_signal(signal.SIGINT)
             p3.communicate(timeout=3)
             self.assertEqual(p3.returncode, 0)
         finally:

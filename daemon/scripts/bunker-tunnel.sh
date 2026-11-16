@@ -493,7 +493,8 @@ for srv in servers:
         headers={
             'Title': 'Bunker Tunnel Active',
             'Priority': 'high',
-            'Tags': 'shield,lock'
+            'Tags': 'shield,lock',
+            'Cache': 'yes'
         }
     )
     try:

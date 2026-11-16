@@ -961,7 +961,11 @@ class ZedViewModel(
         action?.cancel()
         mutable.value = mutable.value.copy(busy = true, toast = "Reconnecting to Zed host...")
         viewModelScope.launch {
-            val cred = activeV2Credential
+            val cred = activeV2Credential ?: try { credentialStore.load() } catch (_: Exception) { null }
+            if (cred != null) {
+                activeV2Credential = cred
+            }
+
             if (cred != null && cred.bunkerTopic != null && cred.bunkerKey != null) {
                 try {
                     val freshOrigin = BunkerTunnel.resolveTunnelUrl(
@@ -996,15 +1000,17 @@ class ZedViewModel(
                     return@launch
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
-                    // Fallthrough to direct retry
+                    // Fallthrough to direct origin retry below
                 }
             }
 
-            val repo = repository
+            val targetCred = cred ?: activeV2Credential
+            val repo = repository ?: if (targetCred != null) try { connectV2(targetCred) } catch (_: Exception) { null } else null
             if (repo != null) {
                 try {
                     repo.checkStatus()
                     val projects = repo.projects()
+                    repository = repo
                     mutable.value = mutable.value.copy(
                         projects = projects,
                         gatewayUnavailable = false,
@@ -1028,7 +1034,11 @@ class ZedViewModel(
                     )
                 }
             } else {
-                mutable.value = mutable.value.copy(busy = false, gatewayUnavailable = true)
+                mutable.value = mutable.value.copy(
+                    busy = false,
+                    gatewayUnavailable = true,
+                    toast = "No saved host pairing. Please pair your phone first.",
+                )
             }
         }
     }
