@@ -134,7 +134,7 @@ show_status() {
             if [[ -r "/proc/${spid}/cmdline" ]]; then
                 cmdline=$(tr '\0' ' ' < "/proc/${spid}/cmdline" 2>/dev/null || true)
             fi
-            if [[ "$cmdline" == *"zed-tunnel"* ]] || [[ "$cmdline" == *"bunker-tunnel"* ]]; then
+            if [[ "$cmdline" == *"zed-tunnel"* ]] || [[ "$cmdline" == *"bunker-tunnel"* ]] || [[ "$cmdline" == *"zedt"* ]]; then
                 is_running=true
             fi
         fi
@@ -183,7 +183,7 @@ stop_tunnel() {
             if [[ -r "/proc/${spid}/cmdline" ]]; then
                 cmdline=$(tr '\0' ' ' < "/proc/${spid}/cmdline" 2>/dev/null || true)
             fi
-            if [[ "$cmdline" == *"zed-tunnel"* ]] || [[ "$cmdline" == *"bunker-tunnel"* ]]; then
+            if [[ "$cmdline" == *"zed-tunnel"* ]] || [[ "$cmdline" == *"bunker-tunnel"* ]] || [[ "$cmdline" == *"zedt"* ]]; then
                 kill "${spid}" 2>/dev/null || true
                 sleep 0.5
                 kill -9 "${spid}" 2>/dev/null || true
