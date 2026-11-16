@@ -487,17 +487,33 @@ class TestYoloAndV2ThreadConfiguration(unittest.TestCase):
                 },
             },
         }
-        # In YOLO mode with --dangerously-skip-permissions
-        auto_approved_response = {
-            "jsonrpc": "2.0",
-            "id": req_permission["id"],
-            "result": {
-                "decision": "approved",
-                "outcome": {"outcome": "approved"},
-            },
-        }
-        self.assertEqual(auto_approved_response["id"], 99)
-        self.assertEqual(auto_approved_response["result"]["decision"], "approved")
+
+        def route_permission_request(msg: dict, mode: str) -> dict:
+            if mode == "yolo":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": msg["id"],
+                    "result": {
+                        "decision": "approved",
+                        "outcome": {"outcome": "approved"},
+                    },
+                }
+            else:
+                return {
+                    "tool_call_id": msg["params"]["toolCall"]["toolCallId"],
+                    "status": "pending_approval",
+                }
+
+        # Verify YOLO auto-approves and matches the request ID
+        yolo_resp = route_permission_request(req_permission, mode="yolo")
+        self.assertEqual(yolo_resp["id"], req_permission["id"])
+        self.assertEqual(yolo_resp["result"]["decision"], "approved")
+        self.assertEqual(yolo_resp["result"]["outcome"]["outcome"], "approved")
+
+        # Verify non-YOLO halts and marks pending approval
+        manual_resp = route_permission_request(req_permission, mode="auto")
+        self.assertEqual(manual_resp["status"], "pending_approval")
+        self.assertEqual(manual_resp["tool_call_id"], "proc_fork_1")
 
 
 if __name__ == "__main__":

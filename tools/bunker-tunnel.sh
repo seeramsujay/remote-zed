@@ -123,7 +123,7 @@ EOF
 show_status() {
     echo -e "${BOLD}Zed Remote Status:${NC}"
     echo -e "--------------------------------------------------"
-    if pgrep -f "free.pinggy.io" >/dev/null 2>&1; then
+    if pgrep -f "tcp@.*pinggy\.io" >/dev/null 2>&1; then
         echo -e "Tunnel Process:  ${GREEN}RUNNING${NC}"
         if [[ -f "${LOG_FILE}" ]]; then
             CURRENT_URL=$(grep -oE "(tcp|http|https)://[a-zA-Z0-9.-]+:[0-9]+" "${LOG_FILE}" | tail -n 1 || true)
@@ -155,7 +155,7 @@ show_status() {
 
 stop_tunnel() {
     echo -e "${YELLOW}[*] Stopping running tunnel instances...${NC}"
-    pkill -f "free.pinggy.io" || true
+    pkill -f "tcp@.*pinggy\.io" || true
     if systemctl --user is-active zed-tunnel.service >/dev/null 2>&1; then
         systemctl --user stop zed-tunnel.service
         echo -e "${GREEN}[✓] Stopped systemd service.${NC}"
@@ -340,7 +340,10 @@ fi
 cleanup() {
     echo ""
     echo -e "${YELLOW}[*] Shutting down pinggy tunnel...${NC}"
-    pkill -f "pinggy.io" || true
+    if [[ -n "${SSH_PID:-}" ]] && kill -0 "${SSH_PID}" 2>/dev/null; then
+        kill "${SSH_PID}" 2>/dev/null || true
+        wait "${SSH_PID}" 2>/dev/null || true
+    fi
     exit 0
 }
 trap cleanup SIGINT SIGTERM
@@ -379,7 +382,10 @@ except Exception as e:
 # Main tunnel loop (Pinggy sessions refresh automatically every 55 minutes on free tier)
 while true; do
     echo -e "${BLUE}[*] Initializing fresh reverse tunnel via SSH (port 443)...${NC}"
-    pkill -f "pinggy.io" || true
+    if [[ -n "${SSH_PID:-}" ]] && kill -0 "${SSH_PID}" 2>/dev/null; then
+        kill "${SSH_PID}" 2>/dev/null || true
+        wait "${SSH_PID}" 2>/dev/null || true
+    fi
     > "${LOG_FILE}"
 
     # Try a.pinggy.io first (more reliable thread capacity), fallback to free.pinggy.io
