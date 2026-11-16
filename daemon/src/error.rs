@@ -34,6 +34,9 @@ pub enum DaemonError {
 
     #[error("Invalid configuration: {0}")]
     Config(String),
+
+    #[error("Internal error: {0}")]
+    Internal(String),
 }
 
 /// Convenience alias for `Result<T, DaemonError>`.

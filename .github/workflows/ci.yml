@@ -37,3 +37,18 @@ jobs:
         run: |
           cd android
           ./gradlew lintDebug testDebugUnitTest --no-daemon
+
+  check-rust-daemon:
+    name: Rust Host Daemon Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: daemon
+      - name: Cargo Check & Test
+        run: |
+          cd daemon
+          cargo check --verbose
+          cargo test --verbose

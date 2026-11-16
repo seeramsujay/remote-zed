@@ -572,7 +572,6 @@ impl MessageRouter {
                         let _ = tx.send(serde_json::to_value(res).unwrap_or_default());
                     }
                 }
-                _ => {}
             }
         }
 
