@@ -1,6 +1,6 @@
 [package]
 name = "zed-remote-daemon"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 authors = ["Zed Remote Contributors"]
 description = "High-performance Rust host daemon proxying Zed ACP streams and providing mobile remote control."
