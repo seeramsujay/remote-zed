@@ -22,7 +22,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # pylint: disable=import-error
+from cryptography.hazmat.primitives.ciphers.aead import (
+    AESGCM,  # pylint: disable=import-error
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCHEMAS_DIR = REPO_ROOT / "shared" / "schemas"
