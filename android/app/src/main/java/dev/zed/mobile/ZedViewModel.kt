@@ -1051,6 +1051,18 @@ class ZedViewModel(
         }
     }
 
+    fun loadGitBranches() {
+        val repo = repository ?: return
+        viewModelScope.launch {
+            try {
+                val branches = repo.gitBranches()
+                mutable.value = mutable.value.copy(gitBranches = branches)
+            } catch (e: Exception) {
+                mutable.value = mutable.value.copy(toast = "Git branches error: ${e.message}")
+            }
+        }
+    }
+
     fun stageGit(paths: List<String>) {
         val repo = repository ?: return
         viewModelScope.launch {
