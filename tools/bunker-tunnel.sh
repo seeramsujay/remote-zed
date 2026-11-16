@@ -28,7 +28,9 @@ NC="\033[0m"
 
 CONFIG_DIR="${HOME}/.config/zed-remote"
 CONFIG_FILE="${CONFIG_DIR}/bunker-session.json"
-LOG_FILE="/tmp/zed-pinggy.log"
+PID_FILE="${CONFIG_DIR}/zed-tunnel.pid"
+LOCK_FILE="${CONFIG_DIR}/zed-tunnel.lock"
+LOG_FILE="${CONFIG_DIR}/zed-pinggy.log"
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 SERVICE_FILE="${SYSTEMD_USER_DIR}/zed-tunnel.service"
 
@@ -123,7 +125,19 @@ EOF
 show_status() {
     echo -e "${BOLD}Zed Remote Status:${NC}"
     echo -e "--------------------------------------------------"
-    if pgrep -f "tcp@.*pinggy\.io" >/dev/null 2>&1; then
+    local is_running=false
+    if [[ -f "${PID_FILE}" ]]; then
+        local spid
+        spid=$(cat "${PID_FILE}" 2>/dev/null || true)
+        if [[ -n "${spid}" ]] && kill -0 "${spid}" 2>/dev/null; then
+            is_running=true
+        fi
+    fi
+    if ! $is_running && pgrep -f "tcp@.*pinggy\.io" >/dev/null 2>&1; then
+        is_running=true
+    fi
+
+    if $is_running; then
         echo -e "Tunnel Process:  ${GREEN}RUNNING${NC}"
         if [[ -f "${LOG_FILE}" ]]; then
             CURRENT_URL=$(grep -oE "(tcp|http|https)://[a-zA-Z0-9.-]+:[0-9]+" "${LOG_FILE}" | tail -n 1 || true)
@@ -155,6 +169,16 @@ show_status() {
 
 stop_tunnel() {
     echo -e "${YELLOW}[*] Stopping running tunnel instances...${NC}"
+    if [[ -f "${PID_FILE}" ]]; then
+        local spid
+        spid=$(cat "${PID_FILE}" 2>/dev/null || true)
+        if [[ -n "${spid}" ]] && kill -0 "${spid}" 2>/dev/null; then
+            kill "${spid}" 2>/dev/null || true
+            sleep 0.5
+            kill -9 "${spid}" 2>/dev/null || true
+        fi
+        rm -f "${PID_FILE}"
+    fi
     pkill -f "tcp@.*pinggy\.io" || true
     if systemctl --user is-active zed-tunnel.service >/dev/null 2>&1; then
         systemctl --user stop zed-tunnel.service
@@ -344,9 +368,10 @@ cleanup() {
         kill "${SSH_PID}" 2>/dev/null || true
         wait "${SSH_PID}" 2>/dev/null || true
     fi
+    rm -f "${PID_FILE}"
     exit 0
 }
-trap cleanup SIGINT SIGTERM
+trap cleanup SIGINT SIGTERM EXIT
 
 encrypt_and_publish() {
     local target_url="$1"
@@ -378,6 +403,15 @@ except Exception as e:
     print(f'[-] Failed to publish to ntfy: {e}')
 "
 }
+
+# Acquire exclusive lock to prevent concurrent supervisors from colliding
+exec 200>"${LOCK_FILE}"
+if ! flock -n 200; then
+    echo -e "${RED}[!] Another zed-tunnel supervisor is already running.${NC}"
+    echo -e "${YELLOW}[*] Check status with: zed-tunnel -s${NC}"
+    exit 1
+fi
+echo $$ > "${PID_FILE}"
 
 # Main tunnel loop (Pinggy sessions refresh automatically every 55 minutes on free tier)
 while true; do
