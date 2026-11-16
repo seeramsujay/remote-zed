@@ -1,0 +1,30 @@
+naming:
+  FunctionNaming:
+    active: true
+    functionPattern: '([a-z][a-zA-Z0-9]*|[A-Z][a-zA-Z0-9]*)'
+
+style:
+  MagicNumber:
+    active: false
+  MaxLineLength:
+    active: false
+  WildcardImport:
+    active: false
+  ReturnCount:
+    active: false
+  UnusedPrivateMember:
+    active: false
+  ForbiddenComment:
+    active: false
+
+complexity:
+  LongMethod:
+    active: false
+  ComplexMethod:
+    active: false
+  LongParameterList:
+    active: false
+  TooManyFunctions:
+    active: false
+  LargeClass:
+    active: false

@@ -130,7 +130,13 @@ show_status() {
         local spid
         spid=$(cat "${PID_FILE}" 2>/dev/null || true)
         if [[ -n "${spid}" ]] && kill -0 "${spid}" 2>/dev/null; then
-            is_running=true
+            local cmdline=""
+            if [[ -r "/proc/${spid}/cmdline" ]]; then
+                cmdline=$(tr '\0' ' ' < "/proc/${spid}/cmdline" 2>/dev/null || true)
+            fi
+            if [[ "$cmdline" == *"zed-tunnel"* ]] || [[ "$cmdline" == *"bunker-tunnel"* ]]; then
+                is_running=true
+            fi
         fi
     fi
     if ! $is_running && pgrep -f "tcp@.*pinggy\.io" >/dev/null 2>&1; then
@@ -173,9 +179,17 @@ stop_tunnel() {
         local spid
         spid=$(cat "${PID_FILE}" 2>/dev/null || true)
         if [[ -n "${spid}" ]] && kill -0 "${spid}" 2>/dev/null; then
-            kill "${spid}" 2>/dev/null || true
-            sleep 0.5
-            kill -9 "${spid}" 2>/dev/null || true
+            local cmdline=""
+            if [[ -r "/proc/${spid}/cmdline" ]]; then
+                cmdline=$(tr '\0' ' ' < "/proc/${spid}/cmdline" 2>/dev/null || true)
+            fi
+            if [[ "$cmdline" == *"zed-tunnel"* ]] || [[ "$cmdline" == *"bunker-tunnel"* ]]; then
+                kill "${spid}" 2>/dev/null || true
+                sleep 0.5
+                kill -9 "${spid}" 2>/dev/null || true
+            else
+                echo -e "${YELLOW}[!] Stale PID ${spid} does not match zed-tunnel supervisor, cleaning PID file.${NC}"
+            fi
         fi
         rm -f "${PID_FILE}"
     fi
