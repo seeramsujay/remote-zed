@@ -48,6 +48,7 @@ android/**/*.aab
 .idea/
 *.iml
 .DS_Store
+release-downloads/
 Thumbs.db
 
 # Python
