@@ -329,6 +329,7 @@ interface ZedRepository {
     suspend fun gitCommit(message: String, stageAll: Boolean): GitCommitResult = unsupported("Git commit")
     suspend fun gitPush(remote: String? = null, branch: String? = null): Unit = unsupported("Git push")
     suspend fun gitBranches(): List<String> = unsupported("Git branches")
+    suspend fun gitCheckout(branch: String): Unit = unsupported("Git checkout")
     suspend fun gitLogGraph(): List<GitCommitInfo> = unsupported("Git log")
 
     private fun <T> unsupported(feature: String): T =

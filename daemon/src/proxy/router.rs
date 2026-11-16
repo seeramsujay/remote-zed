@@ -183,6 +183,18 @@ impl MessageRouter {
                         }
                     }
                 }
+                JsonRpcMessage::Response(res) => {
+                    // Look up and remove matching pending permission entry when resolved by desktop response
+                    let mut approvals = self.pending_approvals.write().await;
+                    let found_id = approvals
+                        .iter()
+                        .find(|(_, p)| p.request_id == res.id)
+                        .map(|(k, _)| k.clone());
+                    if let Some(tool_call_id) = found_id {
+                        approvals.remove(&tool_call_id);
+                        info!("Removed pending approval {} resolved by desktop response id {:?}", tool_call_id, res.id);
+                    }
+                }
                 _ => {}
             }
         }
@@ -256,7 +268,11 @@ impl MessageRouter {
                             })
                             .to_string();
                         let raw_input = tool_call
-                            .and_then(|t| t.get("parameters").or_else(|| t.get("raw_input")))
+                            .and_then(|t| {
+                                t.get("parameters")
+                                    .or_else(|| t.get("raw_input"))
+                                    .or_else(|| t.get("rawInput"))
+                            })
                             .cloned()
                             .unwrap_or(serde_json::Value::Null);
 

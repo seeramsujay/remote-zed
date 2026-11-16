@@ -669,12 +669,22 @@ impl WebSocketGateway {
                 "gateway": "zed-remote-daemon"
             }))
         } else if path == "/v2/pair/claim" && method == "POST" {
-            (200, serde_json::json!({
-                "device_id": "bunker-phone",
-                "credential": auth.token()
-            }))
+            let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+            let secret = body_json.get("secret").and_then(|v| v.as_str()).unwrap_or("");
+            let ticket_id = body_json.get("ticket_id").and_then(|v| v.as_str()).unwrap_or("");
+            if (!secret.is_empty() && auth.validate(secret)) || (!ticket_id.is_empty() && auth.validate(ticket_id)) {
+                (200, serde_json::json!({
+                    "device_id": "bunker-phone",
+                    "credential": auth.token()
+                }))
+            } else {
+                warn!("Unauthorized pair claim attempt from {}", peer_addr);
+                let err_resp = "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 26\r\n\r\n{\"error\":\"unauthorized\"}";
+                let _ = stream.write_all(err_resp.as_bytes()).await;
+                return Ok(());
+            }
         } else {
-            if !token.is_empty() && !auth.validate(token) {
+            if token.is_empty() || !auth.validate(token) {
                 warn!("Rejecting unauthorized HTTP request to {} from {}", path, peer_addr);
                 let err_resp = "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 26\r\n\r\n{\"error\":\"unauthorized\"}";
                 let _ = stream.write_all(err_resp.as_bytes()).await;
@@ -730,7 +740,7 @@ impl WebSocketGateway {
                 } else {
                     ("AntiGravity Agent", "New Conversation")
                 };
-                let thread_id = format!("thread-{}", chrono::Utc::now().timestamp_millis());
+                let thread_id = format!("thread-{}", uuid::Uuid::new_v4());
                 let new_thread = CustomThread {
                     id: thread_id.clone(),
                     title: title.to_string(),
@@ -1198,6 +1208,18 @@ impl WebSocketGateway {
                     match git.branches().await {
                         Ok(branches) => (200, serde_json::json!({ "branches": branches })),
                         Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("POST", "/v2/git/checkout") | ("POST", "/v2/git/branch/checkout") => {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let branch = body_json.get("branch").and_then(|v| v.as_str()).unwrap_or("");
+                    if branch.is_empty() {
+                        (400, serde_json::json!({ "error": "branch is required" }))
+                    } else {
+                        match git.checkout(branch).await {
+                            Ok(out) => (200, serde_json::json!({ "status": "ok", "output": out })),
+                            Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                        }
                     }
                 }
                 ("GET", "/v2/git/log") | ("GET", "/v2/git/graph") => {

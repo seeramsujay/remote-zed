@@ -98,16 +98,30 @@ impl GitEngine {
     /// Returns detailed repository status including modified, staged, and untracked files.
     pub async fn status(&self) -> Result<GitStatusResult> {
         let branch = self.current_branch().await.unwrap_or_else(|_| "HEAD".to_string());
-        let raw_status = self.run_git(&["status", "--porcelain=v1"]).await?;
+        let raw_status = self.run_git(&["status", "--porcelain=v1", "-z"]).await?;
 
         let mut files = Vec::new();
-        for line in raw_status.lines() {
-            if line.len() < 3 {
+        let tokens: Vec<&str> = raw_status.split('\0').collect();
+        let mut idx = 0;
+        while idx < tokens.len() {
+            let token = tokens[idx];
+            idx += 1;
+            if token.len() < 3 {
                 continue;
             }
-            let index_status = line.chars().nth(0).unwrap_or(' ');
-            let worktree_status = line.chars().nth(1).unwrap_or(' ');
-            let file_path = line[3..].trim().to_string();
+            let index_status = token.chars().nth(0).unwrap_or(' ');
+            let worktree_status = token.chars().nth(1).unwrap_or(' ');
+            let file_path = &token[3..];
+
+            // In git status -z porcelain, rename records put the new path first, then old path in the next token
+            let path_to_use = if index_status == 'R' || worktree_status == 'R' {
+                if idx < tokens.len() && !tokens[idx].is_empty() {
+                    idx += 1; // skip old path record
+                }
+                file_path.to_string()
+            } else {
+                file_path.to_string()
+            };
 
             let staged = index_status != ' ' && index_status != '?';
             let status_label = match (index_status, worktree_status) {
@@ -120,13 +134,15 @@ impl GitEngine {
                 _ => "modified",
             };
 
-            files.push(GitFileStatus {
-                path: file_path,
-                status: status_label.to_string(),
-                staged,
-                insertions: 0,
-                deletions: 0,
-            });
+            if !path_to_use.is_empty() {
+                files.push(GitFileStatus {
+                    path: path_to_use,
+                    status: status_label.to_string(),
+                    staged,
+                    insertions: 0,
+                    deletions: 0,
+                });
+            }
         }
 
         let is_clean = files.is_empty();
@@ -217,18 +233,30 @@ impl GitEngine {
         Ok(out)
     }
 
-    /// Unstages specific files (`git restore --staged <paths>`).
+    /// Unstages specific files (`git restore --staged <paths>` or `git rm --cached` if no HEAD yet).
     pub async fn unstage(&self, paths: &[String]) -> Result<()> {
         if paths.is_empty() {
             return Ok(());
         }
-        let mut args = vec!["restore", "--staged", "--"];
+        let has_head = self.run_git(&["rev-parse", "--verify", "HEAD"]).await.is_ok();
+        let mut args = if has_head {
+            vec!["restore", "--staged", "--"]
+        } else {
+            vec!["rm", "--cached", "-r", "--"]
+        };
         let str_paths: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
         args.extend(str_paths);
 
         self.run_git(&args).await?;
         info!("Unstaged {} files", paths.len());
         Ok(())
+    }
+
+    /// Checks out or switches to a branch.
+    pub async fn checkout(&self, branch: &str) -> Result<String> {
+        info!("Checking out branch {}", branch);
+        let out = self.run_git(&["checkout", branch]).await?;
+        Ok(out)
     }
 
     /// Retrieves list of all local and remote branches.

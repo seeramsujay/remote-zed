@@ -128,6 +128,9 @@ fun GitScreen(
                                     else Color.Transparent
                                 )
                                 .clickable {
+                                    if (!isCurrent) {
+                                        vm.checkoutBranch(b)
+                                    }
                                     showBranchesDialog = false
                                 }
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -371,14 +374,18 @@ fun GitScreen(
                     },
                     onCommit = {
                         if (commitMessage.isNotBlank()) {
-                            vm.commitGit(commitMessage, stageAll = false)
-                            commitMessage = ""
+                            val draft = commitMessage
+                            vm.commitGit(draft, stageAll = false, onSuccess = {
+                                if (commitMessage == draft) commitMessage = ""
+                            })
                         }
                     },
                     onStageAllAndCommit = {
                         if (commitMessage.isNotBlank()) {
-                            vm.commitGit(commitMessage, stageAll = true)
-                            commitMessage = ""
+                            val draft = commitMessage
+                            vm.commitGit(draft, stageAll = true, onSuccess = {
+                                if (commitMessage == draft) commitMessage = ""
+                            })
                         }
                     },
                 )

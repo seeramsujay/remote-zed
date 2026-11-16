@@ -122,7 +122,18 @@ internal fun ZedAppContent(
                     .imePadding(),
             ) {
                 state.error?.let { InlineNotice(it, error = true) }
-                PullToRefreshPage(state = state, onRefresh = vm::refresh, modifier = Modifier.weight(1f)) {
+                PullToRefreshPage(
+                    state = state,
+                    onRefresh = {
+                        if (state.page == Page.GIT) {
+                            vm.loadGitStatus()
+                            vm.loadGitLog()
+                        } else {
+                            vm.refresh()
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                ) {
                     when (state.page) {
                         Page.PAIR -> PairScreen(
                             busy = state.busy,

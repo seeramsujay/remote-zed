@@ -445,6 +445,13 @@ class HttpZedRepository private constructor(
         return res.getAsJsonArray("branches")?.mapNotNull { it.asString } ?: emptyList()
     }
 
+    override suspend fun gitCheckout(branch: String) {
+        val body = JsonObject().apply {
+            addProperty("branch", branch)
+        }
+        request("POST", listOf("git", "checkout"), body)
+    }
+
     override suspend fun gitLogGraph(): List<GitCommitInfo> {
         val res = request("GET", listOf("git", "log"))
         return res.getAsJsonArray("commits")?.mapNotNull { elem ->

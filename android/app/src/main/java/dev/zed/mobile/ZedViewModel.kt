@@ -539,6 +539,7 @@ class ZedViewModel(
                                 host = refreshed.origin.trim(),
                                 projects = freshProjects,
                                 gatewayUnavailable = false,
+                                refreshing = false,
                             )
                             startThreadLoad(retryCandidate, freshProjects)
                             return@launch
@@ -552,7 +553,7 @@ class ZedViewModel(
                     mutable.value.copy(error = message(error))
                 }
             } finally {
-                if (repository === repo) mutable.value = mutable.value.copy(refreshing = false)
+                if (repository === repo || activeV2Credential != null) mutable.value = mutable.value.copy(refreshing = false)
             }
         }
     }
@@ -984,7 +985,12 @@ class ZedViewModel(
                         startThreadLoad(candidate, projects)
                         return@launch
                     }
-                } catch (_: Exception) {
+                } catch (e: GatewayAuthenticationException) {
+                    mutable.value = mutable.value.copy(busy = false)
+                    handleRevokedCredential()
+                    return@launch
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     // Fallthrough to direct retry
                 }
             }
@@ -1001,7 +1007,11 @@ class ZedViewModel(
                         toast = "Connected to Zed host!",
                     )
                     startThreadLoad(repo, projects)
+                } catch (e: GatewayAuthenticationException) {
+                    mutable.value = mutable.value.copy(busy = false)
+                    handleRevokedCredential()
                 } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     mutable.value = mutable.value.copy(
                         busy = false,
                         gatewayUnavailable = true,
@@ -1065,7 +1075,7 @@ class ZedViewModel(
         }
     }
 
-    fun commitGit(message: String, stageAll: Boolean = false) {
+    fun commitGit(message: String, stageAll: Boolean = false, onSuccess: (() -> Unit)? = null) {
         val repo = repository ?: return
         if (message.isBlank()) {
             mutable.value = mutable.value.copy(toast = "Commit message cannot be empty")
@@ -1077,8 +1087,25 @@ class ZedViewModel(
                 loadGitStatus()
                 loadGitLog()
                 mutable.value = mutable.value.copy(toast = "Committed: ${res.commitHash}")
+                onSuccess?.invoke()
             } catch (e: Exception) {
                 mutable.value = mutable.value.copy(toast = "Commit failed: ${e.message}")
+            }
+        }
+    }
+
+    fun checkoutBranch(branch: String) {
+        val repo = repository ?: return
+        viewModelScope.launch {
+            try {
+                mutable.value = mutable.value.copy(toast = "Switching to branch $branch...")
+                repo.gitCheckout(branch)
+                loadGitStatus()
+                loadGitLog()
+                loadGitBranches()
+                mutable.value = mutable.value.copy(toast = "Switched to branch $branch")
+            } catch (e: Exception) {
+                mutable.value = mutable.value.copy(toast = "Failed to switch branch: ${e.message}")
             }
         }
     }
@@ -1101,6 +1128,7 @@ class ZedViewModel(
         if (mutable.value.busy) return
         when (mutable.value.page) {
             Page.CHANGES -> navigate(Page.CHAT)
+            Page.GIT -> navigate(if (mutable.value.selectedThread != null) Page.CHAT else Page.PROJECTS)
             Page.CHAT -> {
                 beginChatSession()
                 navigate(Page.PROJECTS); mutable.value =
