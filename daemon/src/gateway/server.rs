@@ -74,6 +74,120 @@ fn is_binary_available(name: &str) -> bool {
     false
 }
 
+/// Dynamically discovers all open and recent Zed workspaces from the local SQLite database
+/// and correlates them with active desktop windows via wmctrl.
+async fn discover_workspaces(fallback_cwd: &str) -> Vec<serde_json::Value> {
+    let script = r#"
+import sqlite3, os, subprocess, json, glob
+
+def discover():
+    open_window_titles = []
+    try:
+        out = subprocess.check_output(['wmctrl', '-lx'], text=True, stderr=subprocess.DEVNULL)
+        for line in out.splitlines():
+            if 'dev.zed.Zed' in line:
+                parts = line.split(None, 4)
+                if len(parts) >= 5:
+                    open_window_titles.append(parts[4].strip())
+    except Exception:
+        pass
+
+    results = []
+    db_candidates = glob.glob(os.path.expanduser('~/.local/share/zed/db/*/db.sqlite')) + \
+                    glob.glob(os.path.expanduser('~/Library/Application Support/Zed/db/*/db.sqlite'))
+    
+    seen_paths = set()
+    for db_path in db_candidates:
+        if not os.path.isfile(db_path): continue
+        try:
+            conn = sqlite3.connect(f'file:{db_path}?mode=ro', uri=True)
+            cur = conn.cursor()
+            for row in cur.execute('SELECT workspace_id, timestamp, paths, window_id FROM workspaces ORDER BY timestamp DESC LIMIT 30'):
+                wid, ts, paths, win_id = row
+                if not paths: continue
+                p = paths.split('\n')[0].strip()
+                if not p or p in seen_paths: continue
+                if not os.path.exists(p): continue
+                seen_paths.add(p)
+                
+                name = os.path.basename(p)
+                is_active = any(name.lower() in t.lower() for t in open_window_titles)
+                
+                cur2 = conn.cursor()
+                cur2.execute('SELECT title, session_id, updated_at FROM sidebar_threads WHERE folder_paths LIKE ? ORDER BY updated_at DESC LIMIT 1', ('%' + p + '%',))
+                t_row = cur2.fetchone()
+                thread_title = t_row[0] if (t_row and t_row[0]) else 'New Conversation'
+                thread_session = t_row[1] if t_row else None
+                
+                results.append({
+                    'id': str(wid),
+                    'name': name,
+                    'path': p,
+                    'is_open': is_active or bool(win_id),
+                    'is_active_window': is_active,
+                    'active_thread_title': thread_title,
+                    'active_session_id': thread_session,
+                    'timestamp': ts,
+                    'kind': 'local'
+                })
+        except Exception:
+            continue
+            
+    print(json.dumps(results))
+
+discover()
+"#;
+
+    if let Ok(output) = tokio::process::Command::new("python3")
+        .args(["-c", script])
+        .output()
+        .await
+    {
+        if output.status.success() {
+            let out_str = String::from_utf8_lossy(&output.stdout);
+            if let Ok(parsed) = serde_json::from_str::<Vec<serde_json::Value>>(out_str.trim()) {
+                if !parsed.is_empty() {
+                    return parsed;
+                }
+            }
+        }
+    }
+
+    let name = std::path::Path::new(fallback_cwd)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "workspace".to_string());
+    vec![serde_json::json!({
+        "id": "current-project",
+        "name": name,
+        "path": fallback_cwd,
+        "is_open": true,
+        "is_active_window": true,
+        "active_thread_title": "New Conversation",
+        "active_session_id": serde_json::Value::Null,
+        "kind": "local"
+    })]
+}
+
+/// Activates or launches a Zed workspace window on the host machine.
+async fn focus_or_open_workspace(path: &str) {
+    if !path.is_empty() {
+        let name = std::path::Path::new(path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if !name.is_empty() {
+            let _ = tokio::process::Command::new("wmctrl")
+                .args(["-a", &name])
+                .output()
+                .await;
+        }
+        let _ = tokio::process::Command::new("zed")
+            .arg(path)
+            .spawn();
+    }
+}
+
 /// A custom user thread representation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CustomThread {
@@ -336,6 +450,8 @@ impl WebSocketGateway {
         telemetry: &TelemetryCollector,
         terminal: &TerminalManager,
     ) -> Option<String> {
+        let scoped_git = git.for_path(req.params.get("path").and_then(|v| v.as_str()));
+        let git = &scoped_git;
         match req.method.as_str() {
             "terminal/exec" => {
                 let command = req.params.get("command").and_then(|v| v.as_str()).unwrap_or("");
@@ -723,26 +839,58 @@ impl WebSocketGateway {
 
             if path == "/v2/projects/catalog" || path == "/v2/projects" {
                 let cwd = terminal.get_cwd().await;
-                let name = std::path::Path::new(&cwd)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "workspace".to_string());
-                (200, serde_json::json!({
-                    "projects": [{
-                        "id": "current-project",
+                let projects = discover_workspaces(&cwd).await;
+                (200, serde_json::json!({ "projects": projects }))
+            } else if (path == "/v2/projects/open" || path == "/v2/workspaces/open" || (path.starts_with("/v2/projects/") && path.ends_with("/open"))) && method == "POST" {
+                let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                let requested_path = body_json.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                let resolved_path = if !requested_path.is_empty() {
+                    requested_path.to_string()
+                } else {
+                    let parts: Vec<&str> = path.split('/').collect();
+                    let proj_id = parts.iter().position(|&p| p == "projects")
+                        .and_then(|idx| parts.get(idx + 1))
+                        .copied()
+                        .unwrap_or("");
+                    let cwd = terminal.get_cwd().await;
+                    let list = discover_workspaces(&cwd).await;
+                    list.into_iter()
+                        .find(|p| p.get("id").and_then(|i| i.as_str()) == Some(proj_id))
+                        .and_then(|p| p.get("path").and_then(|pt| pt.as_str()).map(String::from))
+                        .unwrap_or_default()
+                };
+                if !resolved_path.is_empty() {
+                    focus_or_open_workspace(&resolved_path).await;
+                    let _ = git.for_path(Some(&resolved_path));
+                    let name = std::path::Path::new(&resolved_path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "workspace".to_string());
+                    (200, serde_json::json!({
+                        "id": "opened",
                         "name": name,
-                        "path": cwd,
+                        "path": resolved_path,
                         "is_open": true,
                         "kind": "local"
-                    }]
-                }))
+                    }))
+                } else {
+                    (400, serde_json::json!({ "error": "Invalid workspace path or project ID" }))
+                }
             } else if path.ends_with("/threads") && method == "GET" {
                 let discovered_sessions = session_manager.list_sessions().await;
+                let active_session = router.get_active_session_id().await;
                 let state = thread_state.lock().await;
                 let mut threads_list = Vec::new();
 
                 // 1. Add real AntiGravity recorded sessions discovered from ~/.zed-remote/sessions
-                for s in discovered_sessions {
+                for mut s in discovered_sessions {
+                    let sid = s.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    let is_busy = session_manager.is_session_busy(sid).await;
+                    if let Some(obj) = s.as_object_mut() {
+                        if is_busy {
+                            obj.insert("status".to_string(), serde_json::json!("running"));
+                        }
+                    }
                     threads_list.push(s);
                 }
 
@@ -750,10 +898,12 @@ impl WebSocketGateway {
                 for ct in &state.custom_threads {
                     if !threads_list.iter().any(|t| t.get("id").and_then(|v| v.as_str()) == Some(&ct.id)) {
                         let agent_name = if ct.agent_id == "pi" { "Pi Agent" } else { "AntiGravity Agent" };
+                        let is_busy = session_manager.is_session_busy(&ct.id).await;
+                        let status = if is_busy { "running" } else { &ct.status };
                         threads_list.push(serde_json::json!({
                             "id": ct.id,
                             "title": ct.title,
-                            "status": ct.status,
+                            "status": status,
                             "agent": {
                                 "id": ct.agent_id,
                                 "name": agent_name,
@@ -764,7 +914,32 @@ impl WebSocketGateway {
                 }
                 drop(state);
 
-                // 3. Fallback placeholder if no sessions exist at all
+                // 3. Ensure active desktop session is prioritized at index 0
+                if let Some(ref active_id) = active_session {
+                    let is_busy = session_manager.is_session_busy(active_id).await;
+                    let status = if is_busy { "running" } else { "ready" };
+                    if let Some(pos) = threads_list.iter().position(|t| t.get("id").and_then(|v| v.as_str()) == Some(active_id.as_str())) {
+                        let mut active_item = threads_list.remove(pos);
+                        if let Some(obj) = active_item.as_object_mut() {
+                            obj.insert("status".to_string(), serde_json::json!(status));
+                        }
+                        threads_list.insert(0, active_item);
+                    } else {
+                        let short_id = if active_id.len() >= 8 { &active_id[..8] } else { active_id };
+                        threads_list.insert(0, serde_json::json!({
+                            "id": active_id,
+                            "title": format!("AntiGravity Session {}", short_id),
+                            "status": status,
+                            "agent": {
+                                "id": "antigravity",
+                                "name": "AntiGravity Agent",
+                                "is_native": false
+                            }
+                        }));
+                    }
+                }
+
+                // 4. Fallback placeholder if no sessions exist at all
                 if threads_list.is_empty() {
                     threads_list.push(serde_json::json!({
                         "id": "main-thread",
@@ -804,8 +979,6 @@ impl WebSocketGateway {
                                 .unwrap_or("")
                                 .to_string();
                             if !sid.is_empty() {
-                                router.set_active_session_id(&sid).await;
-                                let _ = router.send_to_zed_stdout(&res_val.to_string()).await;
                                 Ok(sid)
                             } else {
                                 let err_msg = res_val
@@ -1058,7 +1231,7 @@ impl WebSocketGateway {
                         };
                         let prompt_rpc = serde_json::json!({
                             "jsonrpc": "2.0",
-                            "id": 1,
+                            "id": format!("mobile-{}", uuid::Uuid::new_v4()),
                             "method": "session/prompt",
                             "params": {
                                 "sessionId": prompt_session_id,
@@ -1069,39 +1242,49 @@ impl WebSocketGateway {
                             }
                         }).to_string();
 
-                        let handle_res = router.handle_mobile_message(&prompt_rpc).await;
-                        // Only mirror user message notification to Zed stdout if prompt was accepted (not busy or rejected)
-                        if let Some(ref res_str) = handle_res {
-                            if !res_str.contains("\"error\"") {
-                                let zed_user_update = serde_json::json!({
-                                    "jsonrpc": "2.0",
-                                    "method": "session/update",
-                                    "params": {
-                                        "sessionId": prompt_session_id,
-                                        "update": {
-                                            "sessionUpdate": "user_message_chunk",
-                                            "content": {
-                                                "type": "text",
-                                                "text": text
-                                            }
-                                        }
+                        let _ = router.handle_mobile_message(&prompt_rpc).await;
+
+                        // Mirror user message notification to Zed stdout so desktop renders the chunk immediately
+                        let zed_user_update = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "method": "session/update",
+                            "params": {
+                                "sessionId": prompt_session_id,
+                                "update": {
+                                    "sessionUpdate": "user_message_chunk",
+                                    "content": {
+                                        "type": "text",
+                                        "text": text
                                     }
-                                }).to_string();
-                                let _ = router.send_to_zed_stdout(&zed_user_update).await;
+                                }
                             }
-                        }
+                        }).to_string();
+                        let _ = router.send_to_zed_stdout(&zed_user_update).await;
+                        let _ = router.mobile_broadcast_tx.send(zed_user_update);
                     }
                 }
                 (200, serde_json::json!({
                     "accepted": true
                 }))
             } else if path.contains("/threads/") && path.ends_with("/cancel") && method == "POST" {
+                let parts: Vec<&str> = path.split('/').collect();
+                let req_thread_id = parts.iter().position(|&p| p == "threads")
+                    .and_then(|idx| parts.get(idx + 1))
+                    .copied()
+                    .unwrap_or("main-thread");
+
+                let cancel_session_id = if req_thread_id == "main-thread" {
+                    router.get_active_session_id().await.unwrap_or_else(|| "default".to_string())
+                } else {
+                    req_thread_id.to_string()
+                };
+
                 let cancel_rpc = serde_json::json!({
                     "jsonrpc": "2.0",
                     "id": 2,
                     "method": "session/cancel",
                     "params": {
-                        "sessionId": "default"
+                        "sessionId": cancel_session_id
                     }
                 }).to_string();
                 let _ = router.handle_mobile_message(&cancel_rpc).await;
@@ -1143,7 +1326,7 @@ impl WebSocketGateway {
                 let approvals = router.get_pending_approvals().await;
                 let state = thread_state.lock().await;
 
-                let (resolved_id, title, agent_id, agent_name, mut cached_msgs, mut cached_transcript) = if thread_id == "main-thread" {
+                let (resolved_id, title, agent_id, agent_name, cached_msgs, cached_transcript) = if thread_id == "main-thread" {
                     let active = router.get_active_session_id().await;
                     (active, "AntiGravity AI Workspace".to_string(), "antigravity".to_string(), "AntiGravity Agent".to_string(), state.messages.clone(), state.transcript.clone())
                 } else if let Some(ct) = state.custom_threads.iter().find(|t| t.id == thread_id) {
@@ -1167,10 +1350,17 @@ impl WebSocketGateway {
                     transcript = cached_transcript;
                 }
 
+                let is_busy = if let Some(ref sid) = resolved_id {
+                    session_manager.is_session_busy(sid).await
+                } else {
+                    false
+                };
+                let status = if is_busy { "running" } else { "ready" };
+
                 (200, serde_json::json!({
                     "id": thread_id,
                     "title": title,
-                    "status": "ready",
+                    "status": status,
                     "agent": {
                         "id": agent_id,
                         "name": agent_name,
@@ -1178,10 +1368,19 @@ impl WebSocketGateway {
                     },
                     "messages": messages,
                     "transcript": transcript,
-                    "approvals": approvals,
-                    "elicitations": []
+                    "transcript_omitted_entries": 0,
+                    "approvals": approvals
                 }))
             } else {
+                let git_path = query
+                    .split('&')
+                    .find_map(|p| p.strip_prefix("path="))
+                    .map(percent_decode)
+                    .or_else(|| {
+                        let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                        body_json.get("path").and_then(|v| v.as_str()).map(String::from)
+                    });
+                let git = git.for_path(git_path.as_deref());
                 match (method, path) {
                 ("POST", "/v2/terminal/exec") => {
                     let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();

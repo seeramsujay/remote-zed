@@ -60,6 +60,7 @@ pub struct GitCommitInfo {
 #[derive(Clone, Debug)]
 pub struct GitEngine {
     workspace_root: PathBuf,
+    current_root: Arc<std::sync::RwLock<PathBuf>>,
     mutation_lock: Arc<Mutex<()>>,
 }
 
@@ -67,9 +68,47 @@ impl GitEngine {
     /// Initializes a GitEngine anchored at `workspace_root`.
     pub fn new(workspace_root: PathBuf) -> Self {
         Self {
-            workspace_root,
+            workspace_root: workspace_root.clone(),
+            current_root: Arc::new(std::sync::RwLock::new(workspace_root)),
             mutation_lock: Arc::new(Mutex::new(())),
         }
+    }
+
+    /// Returns a new GitEngine scoped to `maybe_path` if valid, or defaulting to `current_root`.
+    /// When `maybe_path` is provided and is a valid directory, it updates `current_root` so that
+    /// subsequent git operations remain pinned to this workspace until changed.
+    pub fn for_path(&self, maybe_path: Option<&str>) -> Self {
+        if let Some(p) = maybe_path {
+            let pb = PathBuf::from(p);
+            if pb.is_dir() {
+                if let Ok(mut cur) = self.current_root.write() {
+                    *cur = pb.clone();
+                }
+                return Self {
+                    workspace_root: pb,
+                    current_root: Arc::clone(&self.current_root),
+                    mutation_lock: Arc::clone(&self.mutation_lock),
+                };
+            }
+        }
+        let cur = self
+            .current_root
+            .read()
+            .map(|g| g.clone())
+            .unwrap_or_else(|_| self.workspace_root.clone());
+        Self {
+            workspace_root: cur,
+            current_root: Arc::clone(&self.current_root),
+            mutation_lock: Arc::clone(&self.mutation_lock),
+        }
+    }
+
+    /// Returns the currently active workspace root directory for Git.
+    pub fn get_current_root(&self) -> PathBuf {
+        self.current_root
+            .read()
+            .map(|g| g.clone())
+            .unwrap_or_else(|_| self.workspace_root.clone())
     }
 
     /// Helper to execute a git command in the repository workspace.

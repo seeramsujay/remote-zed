@@ -85,16 +85,86 @@ fun GitScreen(
     var selectedTab by remember { mutableIntStateOf(0) }
     var commitMessage by remember { mutableStateOf("") }
     var showBranchesDialog by remember { mutableStateOf(false) }
+    var showWorkspacesDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        vm.loadGitStatus()
-        vm.loadGitLog()
+    val activeGitProject = state.project ?: state.lastActiveProject ?: state.projects.firstOrNull()
+
+    LaunchedEffect(activeGitProject?.path) {
+        vm.loadGitStatus(activeGitProject?.path)
+        vm.loadGitLog(activeGitProject?.path)
     }
 
     val status = state.gitStatus
     val branch = status?.branch ?: "HEAD"
     val stagedFiles = status?.files?.filter { it.staged } ?: emptyList()
     val unstagedFiles = status?.files?.filter { !it.staged } ?: emptyList()
+
+    if (showWorkspacesDialog) {
+        AlertDialog(
+            onDismissRequest = { showWorkspacesDialog = false },
+            containerColor = Color(0xFF1E1E26),
+            titleContentColor = Color(0xFFF3F3F7),
+            textContentColor = Color(0xFFF3F3F7),
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.AccountTree,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Switch Git Workspace",
+                        style = MaterialTheme.typography.titleMedium.copy(fontFamily = InterFamily),
+                    )
+                }
+            },
+            text = {
+                LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                    items(state.projects) { p ->
+                        val isCurrent = p.id == activeGitProject?.id
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (isCurrent) MaterialTheme.colorScheme.surfaceContainerHigh
+                                    else Color.Transparent,
+                                )
+                                .clickable {
+                                    vm.switchGitWorkspace(p)
+                                    showWorkspacesDialog = false
+                                }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    p.name,
+                                    style = TextStyle(
+                                        fontFamily = InterFamily,
+                                        fontSize = 14.sp,
+                                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isCurrent) MaterialTheme.colorScheme.primary else Color.White,
+                                    ),
+                                )
+                                Text(shortPath(p.path), style = MaterialTheme.typography.bodySmall, color = ZedColors.Muted)
+                            }
+                            if (p.isActiveWindow) {
+                                StatusDot(Color(0xFF34D399), size = 8.dp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showWorkspacesDialog = false }) {
+                    Text("Close", color = Color(0xFFA58DFE))
+                }
+            },
+        )
+    }
 
     if (showBranchesDialog) {
         AlertDialog(
@@ -176,6 +246,65 @@ fun GitScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
     ) {
+        // Workspace Selector Header Bar
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .clickable { showWorkspacesDialog = true }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AccountTree,
+                        contentDescription = "Workspace",
+                        tint = Color(0xFFA58DFE),
+                        modifier = Modifier.size(15.dp),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = activeGitProject?.name ?: "Workspace",
+                        style = TextStyle(
+                            fontFamily = InterFamily,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                        ),
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Switch Workspace",
+                        tint = ZedColors.Muted,
+                        modifier = Modifier.size(15.dp),
+                    )
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                if (activeGitProject != null) {
+                    Text(
+                        shortPath(activeGitProject.path),
+                        style = TextStyle(
+                            fontFamily = MonoFamily,
+                            fontSize = 11.sp,
+                            color = ZedColors.Muted,
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+
         // Sub-header bar: Branch chip, Push button, Refresh indicator
         Surface(
             color = MaterialTheme.colorScheme.surface,

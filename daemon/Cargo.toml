@@ -1,16 +1,17 @@
 [package]
 name = "zed-remote-daemon"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 authors = ["Zed Remote Contributors"]
 description = "High-performance Rust host daemon proxying Zed ACP streams and providing mobile remote control."
 readme = "README.md"
 license = "MIT"
 
+[workspace]
+
 [dependencies]
 # Asynchronous Runtime & I/O
 tokio = { version = "1.38", features = ["full"] }
-tokio-util = { version = "0.7", features = ["codec"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 # WebSocket Server & Networking

@@ -6,7 +6,6 @@ use crate::security::SecurityGuard;
 use crate::session::{MessageDirection, SessionManager};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
@@ -39,6 +38,8 @@ pub struct MessageRouter {
     pending_permissions: Arc<Mutex<HashMap<String, PendingPermission>>>,
     /// Map of pending requests dispatched to the child agent awaiting a direct response.
     pending_agent_requests: Arc<Mutex<HashMap<String, oneshot::Sender<serde_json::Value>>>>,
+    /// Map of in-flight prompt requests tracking their associated session ID.
+    pending_prompt_sessions: Arc<Mutex<HashMap<String, String>>>,
     /// Active operational mode (e.g. "yolo", "auto", "plan").
     current_mode: Arc<RwLock<String>>,
     /// Actively tracked session ID in flight between Zed and the agent.
@@ -62,6 +63,7 @@ impl MessageRouter {
             security,
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
             pending_agent_requests: Arc::new(Mutex::new(HashMap::new())),
+            pending_prompt_sessions: Arc::new(Mutex::new(HashMap::new())),
             current_mode: Arc::new(RwLock::new("yolo".to_string())),
             active_session_id: Arc::new(RwLock::new(None)),
         }
@@ -341,6 +343,11 @@ impl MessageRouter {
                     if req.method == "session/prompt" {
                         if let Some(session_id) = req.params.get("sessionId").and_then(|v| v.as_str()) {
                             let _ = self.session_manager.acquire_prompt_lock(session_id).await;
+                            let id_str = match &req.id {
+                                RequestId::String(s) => s.clone(),
+                                RequestId::Integer(i) => i.to_string(),
+                            };
+                            self.pending_prompt_sessions.lock().await.insert(id_str, session_id.to_string());
                             self.session_manager
                                 .log_event(session_id, MessageDirection::ZedToAgent, &serde_json::to_value(req).unwrap_or_default())
                                 .await;
@@ -384,6 +391,7 @@ impl MessageRouter {
                     if notif.method == "session/update" {
                         if let Some(session_id) = notif.params.get("sessionId").and_then(|v| v.as_str()) {
                             self.set_active_session_id(session_id).await;
+                            self.session_manager.touch_prompt_lock(session_id).await;
                             self.session_manager
                                 .log_event(session_id, MessageDirection::AgentToZed, &serde_json::to_value(notif).unwrap_or_default())
                                 .await;
@@ -569,7 +577,34 @@ impl MessageRouter {
                     };
                     let mut pending = self.pending_agent_requests.lock().await;
                     if let Some(tx) = pending.remove(&id_str) {
-                        let _ = tx.send(serde_json::to_value(res).unwrap_or_default());
+                        let _ = tx.send(serde_json::to_value(res.clone()).unwrap_or_default());
+                    }
+                    drop(pending);
+
+                    // Releasing prompt lock on tracked session and notifying mobile of turn completion
+                    let target_session_id = {
+                        let mut p = self.pending_prompt_sessions.lock().await;
+                        p.remove(&id_str)
+                    };
+                    let session_to_release = match target_session_id {
+                        Some(sid) => Some(sid),
+                        None => self.get_active_session_id().await,
+                    };
+
+                    if let Some(session_id) = session_to_release {
+                        self.session_manager.release_prompt_lock(&session_id).await;
+                        let completion_sse = format!(
+                            "event: thread_completed\ndata: {}\n\n",
+                            serde_json::json!({
+                                "project_id": "current-project",
+                                "project_name": "remote-zed",
+                                "thread_id": session_id,
+                                "thread_title": "AntiGravity Turn Completed",
+                                "turn_id": format!("turn-{}", uuid::Uuid::new_v4())
+                            })
+                        );
+                        let _ = self.mobile_broadcast_tx.send(completion_sse);
+                        Self::trigger_bunker_ntfy("AntiGravity Task Finished", "Turn completed on remote-zed", "robot,check", "default");
                     }
                 }
             }
@@ -633,18 +668,14 @@ impl MessageRouter {
                             trimmed.to_string()
                         };
 
-                        // Concurrency check: enforce single-writer lock
-                        if let Err(e) = self.session_manager.acquire_prompt_lock(&session_id).await {
-                            warn!("Concurrent prompt rejected: {}", e);
-                            return Some(
-                                serde_json::to_string(&JsonRpcResponse::error(
-                                    req.id,
-                                    error_codes::SERVER_BUSY,
-                                    "Server busy: another prompt is currently processing",
-                                ))
-                                .unwrap_or_default(),
-                            );
-                        }
+                        // Record prompt execution
+                        let _ = self.session_manager.acquire_prompt_lock(&session_id).await;
+
+                        let id_str = match &req.id {
+                            RequestId::String(s) => s.clone(),
+                            RequestId::Integer(i) => i.to_string(),
+                        };
+                        self.pending_prompt_sessions.lock().await.insert(id_str.clone(), session_id.clone());
 
                         // Log event
                         self.session_manager
@@ -654,6 +685,7 @@ impl MessageRouter {
                         // Forward prompt to agent stdin
                         if let Err(e) = self.agent_stdin_tx.send(format_ndjson_line(&prompt_payload)).await {
                             error!("Failed to route mobile prompt to agent: {}", e);
+                            self.pending_prompt_sessions.lock().await.remove(&id_str);
                             self.session_manager.release_prompt_lock(&session_id).await;
                             return Some(
                                 serde_json::to_string(&JsonRpcResponse::error(
@@ -671,6 +703,25 @@ impl MessageRouter {
                             serde_json::to_string(&JsonRpcResponse::success(
                                 req.id,
                                 serde_json::json!({ "status": "dispatched", "sessionId": session_id }),
+                            ))
+                            .unwrap_or_default(),
+                        )
+                    }
+                    "session/cancel" => {
+                        let raw_session_id = req.params.get("sessionId")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("default");
+                        let session_id = if raw_session_id == "default" || raw_session_id == "main-thread" {
+                            self.get_active_session_id().await.unwrap_or_else(|| "default".to_string())
+                        } else {
+                            raw_session_id.to_string()
+                        };
+                        self.session_manager.release_prompt_lock(&session_id).await;
+                        let _ = self.agent_stdin_tx.send(format_ndjson_line(trimmed)).await;
+                        Some(
+                            serde_json::to_string(&JsonRpcResponse::success(
+                                req.id,
+                                serde_json::json!({ "status": "cancelled", "sessionId": session_id }),
                             ))
                             .unwrap_or_default(),
                         )
