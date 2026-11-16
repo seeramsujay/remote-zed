@@ -51,9 +51,19 @@ echo -e "${GREEN}[✓] Dependencies verified.${NC}\n"
 
 # 2. Setup installation directory
 INSTALL_ROOT="${HOME}/.local/share/zed-remote"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 echo -e "${BLUE}${BOLD}[*] Step 2/6: Installing Zed Remote scripts and configs to ${INSTALL_ROOT}...${NC}"
 
-if command -v git &>/dev/null; then
+if [[ -n "${SCRIPT_DIR}" ]] && [[ -f "${SCRIPT_DIR}/tools/bunker-tunnel.sh" ]] && [[ "${SCRIPT_DIR}" != "${INSTALL_ROOT}" ]]; then
+    echo -e "${BLUE}[*] Syncing files from local repository (${SCRIPT_DIR})...${NC}"
+    mkdir -p "${INSTALL_ROOT}/tools" "${INSTALL_ROOT}/extensions"
+    cp -r "${SCRIPT_DIR}/tools/"* "${INSTALL_ROOT}/tools/"
+    cp -r "${SCRIPT_DIR}/extensions/"* "${INSTALL_ROOT}/extensions/"
+    if [[ -d "${SCRIPT_DIR}/daemon/scripts" ]]; then
+        mkdir -p "${INSTALL_ROOT}/daemon/scripts"
+        cp -r "${SCRIPT_DIR}/daemon/scripts/"* "${INSTALL_ROOT}/daemon/scripts/"
+    fi
+elif command -v git &>/dev/null; then
     if [ -d "${INSTALL_ROOT}/.git" ]; then
         echo -e "${BLUE}[*] Updating existing installation...${NC}"
         cd "${INSTALL_ROOT}"
@@ -70,11 +80,16 @@ fi
 chmod +x "${INSTALL_ROOT}/tools/"*.sh
 echo -e "${GREEN}[✓] Files installed successfully.${NC}\n"
 
-# Download prebuilt daemon binary if not present
+# Download prebuilt daemon binary (v0.1.2)
 mkdir -p "${HOME}/.local/bin"
-if [[ ! -f "${HOME}/.local/bin/zed-remote-daemon" ]]; then
-    echo -e "${BLUE}[*] Fetching prebuilt zed-remote-daemon release binary...${NC}"
-    curl -fsSL https://github.com/seeramsujay/remote-zed/releases/download/v0.1.1/zed-remote-daemon-linux-x86_64.tar.gz | tar -xz -C "${HOME}/.local/bin" || true
+RELEASE_TAG="v0.1.2"
+if [[ -n "${SCRIPT_DIR}" ]] && [[ -f "${SCRIPT_DIR}/release-downloads/zed-remote-daemon-linux-x86_64.tar.gz" ]]; then
+    echo -e "${BLUE}[*] Unpacking local prebuilt zed-remote-daemon (${RELEASE_TAG})...${NC}"
+    tar -xzf "${SCRIPT_DIR}/release-downloads/zed-remote-daemon-linux-x86_64.tar.gz" -C "${HOME}/.local/bin"
+    chmod +x "${HOME}/.local/bin/zed-remote-daemon"
+elif [[ ! -f "${HOME}/.local/bin/zed-remote-daemon" ]]; then
+    echo -e "${BLUE}[*] Fetching prebuilt zed-remote-daemon ${RELEASE_TAG} release binary...${NC}"
+    curl -fsSL "https://github.com/seeramsujay/remote-zed/releases/download/${RELEASE_TAG}/zed-remote-daemon-linux-x86_64.tar.gz" | tar -xz -C "${HOME}/.local/bin" || true
     chmod +x "${HOME}/.local/bin/zed-remote-daemon" 2>/dev/null || true
 fi
 
@@ -159,9 +174,8 @@ echo -e "${GREEN}${BOLD}               🎉 ZED REMOTE INSTALLATION COMPLETE! �
 echo -e "${GREEN}${BOLD}======================================================================${NC}"
 echo ""
 echo -e "📱 ${BOLD}Step 1: Download the Mobile App${NC}"
-echo -e "   • Native Jetpack Compose APK: ${CYAN}zed-remote.apk${NC} (Recommended)"
-echo -e "   • Flutter Cross-Platform APK: ${CYAN}zed-remote-flutter.apk${NC}"
-echo -e "   • Download latest from: ${CYAN}https://github.com/seeramsujay/remote-zed/releases${NC}"
+echo -e "   • Native Jetpack Compose APK: ${CYAN}zed-remote.apk${NC}"
+echo -e "   • Download latest from: ${CYAN}https://github.com/seeramsujay/remote-zed/releases/tag/v0.1.2${NC}"
 echo ""
 echo -e "🏰 ${BOLD}Step 2: Bind Your Phone Once${NC}"
 echo -e "   Run: ${CYAN}zed-tunnel --bind${NC}  (or: ${CYAN}zedt --bind${NC})"
