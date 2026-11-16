@@ -18,8 +18,8 @@ NC="\033[0m"
 
 echo -e "${CYAN}${BOLD}"
 cat << 'EOF'
-  ______        _   ____                      _       
- |__  /  ___ __| | |  _ \ ___ _ __ ___   ___ | |_ ___ 
+  ______        _   ____                      _
+ |__  /  ___ __| | |  _ \ ___ _ __ ___   ___ | |_ ___
    / /  / _ \ _` | | |_) / _ \ '_ ` _ \ / _ \| __/ _ \
   / /__|  __/ (_| | |  _ <  __/ | | | | | (_) | ||  __/
  /_____\___|\__,_| |_| \_\___|_| |_| |_|\___/ \__\___|
@@ -80,16 +80,17 @@ fi
 chmod +x "${INSTALL_ROOT}/tools/"*.sh
 echo -e "${GREEN}[✓] Files installed successfully.${NC}\n"
 
-# Download prebuilt daemon binary (v0.1.2)
+# Download prebuilt daemon binary (v0.1.3)
 mkdir -p "${HOME}/.local/bin"
-RELEASE_TAG="v0.1.2"
+RELEASE_TAG="v0.1.3"
 if [[ -n "${SCRIPT_DIR}" ]] && [[ -f "${SCRIPT_DIR}/release-downloads/zed-remote-daemon-linux-x86_64.tar.gz" ]]; then
     echo -e "${BLUE}[*] Unpacking local prebuilt zed-remote-daemon (${RELEASE_TAG})...${NC}"
     tar -xzf "${SCRIPT_DIR}/release-downloads/zed-remote-daemon-linux-x86_64.tar.gz" -C "${HOME}/.local/bin"
     chmod +x "${HOME}/.local/bin/zed-remote-daemon"
 elif [[ ! -f "${HOME}/.local/bin/zed-remote-daemon" ]]; then
     echo -e "${BLUE}[*] Fetching prebuilt zed-remote-daemon ${RELEASE_TAG} release binary...${NC}"
-    curl -fsSL "https://github.com/seeramsujay/remote-zed/releases/download/${RELEASE_TAG}/zed-remote-daemon-linux-x86_64.tar.gz" | tar -xz -C "${HOME}/.local/bin" || true
+    curl -fsSL "https://github.com/seeramsujay/remote-zed/releases/download/${RELEASE_TAG}/zed-remote-daemon-linux-x86_64.tar.gz" | tar -xz -C "${HOME}/.local/bin" || \
+    curl -fsSL "https://github.com/seeramsujay/remote-zed/releases/latest/download/zed-remote-daemon-linux-x86_64.tar.gz" | tar -xz -C "${HOME}/.local/bin" || true
     chmod +x "${HOME}/.local/bin/zed-remote-daemon" 2>/dev/null || true
 fi
 

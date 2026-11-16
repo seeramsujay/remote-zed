@@ -1,5 +1,11 @@
 package dev.zed.mobile
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -55,9 +61,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
@@ -88,9 +96,20 @@ fun TerminalScreen(
         )
     }
 
-    var inputCommand by remember { mutableStateOf("") }
+    var inputCommand by remember { mutableStateOf(TextFieldValue("")) }
     var running by remember { mutableStateOf(false) }
     var cwd by remember { mutableStateOf(currentCwd) }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "cursor")
+    val cursorAlpha by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 500, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "blink",
+    )
 
     val history = remember { mutableStateListOf<String>() }
     var historyIndex by remember { mutableIntStateOf(-1) }
@@ -105,6 +124,11 @@ fun TerminalScreen(
         keyboard?.show()
     }
 
+    fun appendQuickKey(txt: String) {
+        val newText = inputCommand.text + txt
+        inputCommand = TextFieldValue(text = newText, selection = TextRange(newText.length))
+    }
+
     fun runCmd(cmdText: String) {
         val trimmed = cmdText.trim()
         if (trimmed.isEmpty() || running) return
@@ -113,7 +137,7 @@ fun TerminalScreen(
         historyIndex = history.size
 
         entries.add(TerminalEntry(text = trimmed, isInput = true, cwd = cwd))
-        inputCommand = ""
+        inputCommand = TextFieldValue("")
         running = true
 
         scope.launch {
@@ -268,25 +292,27 @@ fun TerminalScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TermuxQuickKey("TAB") { inputCommand += "\t" }
-                    TermuxQuickKey("~") { inputCommand += "~" }
-                    TermuxQuickKey("/") { inputCommand += "/" }
-                    TermuxQuickKey("-") { inputCommand += "-" }
-                    TermuxQuickKey("|") { inputCommand += "|" }
-                    TermuxQuickKey("..") { inputCommand += ".." }
+                    TermuxQuickKey("TAB") { appendQuickKey("\t") }
+                    TermuxQuickKey("~") { appendQuickKey("~") }
+                    TermuxQuickKey("/") { appendQuickKey("/") }
+                    TermuxQuickKey("-") { appendQuickKey("-") }
+                    TermuxQuickKey("|") { appendQuickKey("|") }
+                    TermuxQuickKey("..") { appendQuickKey("..") }
                     TermuxQuickKey("↑") {
                         if (history.isNotEmpty() && historyIndex > 0) {
                             historyIndex--
-                            inputCommand = history[historyIndex]
+                            val histText = history[historyIndex]
+                            inputCommand = TextFieldValue(text = histText, selection = TextRange(histText.length))
                         }
                     }
                     TermuxQuickKey("↓") {
                         if (history.isNotEmpty() && historyIndex < history.size - 1) {
                             historyIndex++
-                            inputCommand = history[historyIndex]
+                            val histText = history[historyIndex]
+                            inputCommand = TextFieldValue(text = histText, selection = TextRange(histText.length))
                         } else {
                             historyIndex = history.size
-                            inputCommand = ""
+                            inputCommand = TextFieldValue("")
                         }
                     }
                     TermuxQuickKey("Ctrl+C") { runCmd("^C") }
@@ -328,50 +354,53 @@ fun TerminalScreen(
                             .focusRequester(focusRequester),
                         textStyle = TextStyle(
                             fontFamily = MonoFamily,
-                            fontSize = 13.5.sp,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface,
                         ),
                         cursorBrush = SolidColor(Color(0xFF34D399)),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                        keyboardActions = KeyboardActions(onGo = { runCmd(inputCommand) }),
+                        keyboardActions = KeyboardActions(onGo = { runCmd(inputCommand.text) }),
                         decorationBox = { innerTextField ->
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .heightIn(min = 40.dp)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                    ) {
-                                        focusRequester.requestFocus()
-                                        keyboard?.show()
-                                    },
+                                    .heightIn(min = 40.dp),
                                 contentAlignment = Alignment.CenterStart,
                             ) {
-                                if (inputCommand.isEmpty()) {
-                                    Text(
-                                        text = "type command (mkdir, cargo, git)...",
-                                        style = TextStyle(
-                                            fontFamily = MonoFamily,
-                                            fontSize = 12.5.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                        ),
-                                    )
+                                if (inputCommand.text.isEmpty()) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(8.dp)
+                                                .height(16.dp)
+                                                .background(Color(0xFF34D399).copy(alpha = cursorAlpha)),
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "type command (mkdir, cargo, git)...",
+                                            style = TextStyle(
+                                                fontFamily = MonoFamily,
+                                                fontSize = 12.5.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                            ),
+                                        )
+                                    }
                                 }
                                 innerTextField()
                             }
                         },
                     )
                     IconButton(
-                        onClick = { runCmd(inputCommand) },
-                        enabled = inputCommand.isNotBlank() && !running,
+                        onClick = { runCmd(inputCommand.text) },
+                        enabled = inputCommand.text.isNotBlank() && !running,
                         modifier = Modifier.size(32.dp),
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = "Run",
-                            tint = if (inputCommand.isNotBlank() && !running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                            tint = if (inputCommand.text.isNotBlank() && !running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(
                                 alpha = 0.4f
                             ),
                             modifier = Modifier.size(18.dp),

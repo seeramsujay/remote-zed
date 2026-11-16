@@ -77,6 +77,11 @@ show_help() {
 
 manage_service() {
     local cmd="${1:-status}"
+    if ! command -v systemctl &>/dev/null; then
+        echo -e "${RED}[!] systemctl is not available on this platform (macOS / non-systemd).${NC}"
+        echo -e "    Use on-demand mode: ${CYAN}zed-tunnel${NC} (or ${CYAN}zedt${NC})"
+        exit 1
+    fi
     case "$cmd" in
         enable)
             mkdir -p "${SYSTEMD_USER_DIR}"
@@ -134,6 +139,9 @@ show_status() {
             if [[ -r "/proc/${spid}/cmdline" ]]; then
                 cmdline=$(tr '\0' ' ' < "/proc/${spid}/cmdline" 2>/dev/null || true)
             fi
+            if [[ -z "$cmdline" ]]; then
+                cmdline=$(ps -p "${spid}" -o command= 2>/dev/null || true)
+            fi
             if [[ "$cmdline" == *"zed-tunnel"* ]] || [[ "$cmdline" == *"bunker-tunnel"* ]] || [[ "$cmdline" == *"zedt"* ]]; then
                 is_running=true
             fi
@@ -162,12 +170,16 @@ show_status() {
         echo -e "Saved Binding:   ${YELLOW}NOT CONFIGURED${NC} (Run: zed-tunnel --bind)"
     fi
 
-    if systemctl --user is-active zed-tunnel.service >/dev/null 2>&1; then
-        echo -e "Systemd Service: ${GREEN}ACTIVE${NC}"
-    elif systemctl --user is-enabled zed-tunnel.service >/dev/null 2>&1; then
-        echo -e "Systemd Service: ${YELLOW}ENABLED (INACTIVE)${NC}"
+    if command -v systemctl &>/dev/null; then
+        if systemctl --user is-active zed-tunnel.service >/dev/null 2>&1; then
+            echo -e "Systemd Service: ${GREEN}ACTIVE${NC}"
+        elif systemctl --user is-enabled zed-tunnel.service >/dev/null 2>&1; then
+            echo -e "Systemd Service: ${YELLOW}ENABLED (INACTIVE)${NC}"
+        else
+            echo -e "Systemd Service: ${YELLOW}DISABLED (On-Demand Mode)${NC}"
+        fi
     else
-        echo -e "Systemd Service: ${YELLOW}DISABLED (On-Demand Mode)${NC}"
+        echo -e "Systemd Service: ${YELLOW}NOT AVAILABLE (macOS / non-systemd)${NC}"
     fi
     echo -e "--------------------------------------------------"
     exit 0
@@ -183,18 +195,28 @@ stop_tunnel() {
             if [[ -r "/proc/${spid}/cmdline" ]]; then
                 cmdline=$(tr '\0' ' ' < "/proc/${spid}/cmdline" 2>/dev/null || true)
             fi
+            if [[ -z "$cmdline" ]]; then
+                cmdline=$(ps -p "${spid}" -o command= 2>/dev/null || true)
+            fi
             if [[ "$cmdline" == *"zed-tunnel"* ]] || [[ "$cmdline" == *"bunker-tunnel"* ]] || [[ "$cmdline" == *"zedt"* ]]; then
                 kill "${spid}" 2>/dev/null || true
-                sleep 0.5
-                kill -9 "${spid}" 2>/dev/null || true
+                for _ in {1..10}; do
+                    if ! kill -0 "${spid}" 2>/dev/null; then
+                        break
+                    fi
+                    sleep 0.1
+                done
+                if kill -0 "${spid}" 2>/dev/null; then
+                    kill -9 "${spid}" 2>/dev/null || true
+                fi
             else
                 echo -e "${YELLOW}[!] Stale PID ${spid} does not match zed-tunnel supervisor, cleaning PID file.${NC}"
             fi
         fi
         rm -f "${PID_FILE}"
     fi
-    pkill -f "tcp@.*pinggy\.io" || true
-    if systemctl --user is-active zed-tunnel.service >/dev/null 2>&1; then
+    pkill -f "tcp@.*pinggy\.io" 2>/dev/null || true
+    if command -v systemctl &>/dev/null && systemctl --user is-active zed-tunnel.service >/dev/null 2>&1; then
         systemctl --user stop zed-tunnel.service
         echo -e "${GREEN}[✓] Stopped systemd service.${NC}"
     fi
@@ -294,24 +316,69 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+acquire_lock() {
+    if command -v flock &>/dev/null; then
+        flock -n 200
+    else
+        python3 -c "
+import fcntl, sys
+try:
+    fcntl.flock(200, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except (BlockingIOError, OSError):
+    sys.exit(1)
+"
+    fi
+}
+
+release_lock() {
+    if command -v flock &>/dev/null; then
+        flock -u 200 2>/dev/null || true
+    else
+        python3 -c "import fcntl; fcntl.flock(200, fcntl.LOCK_UN)" 2>/dev/null || true
+    fi
+    exec 200>&- 2>/dev/null || true
+}
+
 HAS_LOCK=false
+CLEANING_UP=false
+
 cleanup() {
+    # Prevent re-entrant cleanup calls (e.g., SIGINT followed by EXIT trap)
+    if [[ "$CLEANING_UP" = true ]]; then
+        return
+    fi
+    CLEANING_UP=true
+    trap - SIGINT SIGTERM EXIT
+
     echo ""
     echo -e "${YELLOW}[*] Shutting down pinggy tunnel...${NC}"
     if [[ -n "${SSH_PID:-}" ]] && kill -0 "${SSH_PID}" 2>/dev/null; then
         kill "${SSH_PID}" 2>/dev/null || true
+        for _ in {1..10}; do
+            if ! kill -0 "${SSH_PID}" 2>/dev/null; then
+                break
+            fi
+            sleep 0.1
+        done
+        if kill -0 "${SSH_PID}" 2>/dev/null; then
+            kill -9 "${SSH_PID}" 2>/dev/null || true
+        fi
         wait "${SSH_PID}" 2>/dev/null || true
     fi
+    pkill -f "tcp@.*pinggy\.io" 2>/dev/null || true
     if [[ "$HAS_LOCK" = true ]]; then
         rm -f "${PID_FILE}"
+        release_lock
     fi
     exit 0
 }
-trap cleanup SIGINT SIGTERM EXIT
+
+# Temporary trap before acquiring lock to avoid spurious cleanup on premature abort
+trap 'exit 130' SIGINT SIGTERM
 
 # Acquire exclusive lock BEFORE credential mutation (--reset) or supervisor startup
 exec 200>"${LOCK_FILE}"
-if ! flock -n 200; then
+if ! acquire_lock; then
     echo -e "${RED}[!] Another zed-tunnel supervisor is already running.${NC}"
     echo -e "${YELLOW}[*] Check status with: zed-tunnel -s"
     echo -e "    To stop or reset:  zed-tunnel --stop${NC}"
@@ -319,12 +386,13 @@ if ! flock -n 200; then
 fi
 HAS_LOCK=true
 echo $$ > "${PID_FILE}"
+trap cleanup SIGINT SIGTERM EXIT
 
 if [[ "$DAEMON_MODE" = false ]]; then
     echo -e "${CYAN}${BOLD}"
     cat << 'EOF'
-  ______        _   ____                      _       
- |__  /  ___ __| | |  _ \ ___ _ __ ___   ___ | |_ ___ 
+  ______        _   ____                      _
+ |__  /  ___ __| | |  _ \ ___ _ __ ___   ___ | |_ ___
    / /  / _ \ _` | | |_) / _ \ '_ ` _ \ / _ \| __/ _ \
   / /__|  __/ (_| | |  _ <  __/ | | | | | (_) | ||  __/
  /_____\___|\__,_| |_| \_\___|_| |_| |_|\___/ \__\___|
@@ -457,16 +525,32 @@ while true; do
     echo -e "${BLUE}[*] Initializing fresh reverse tunnel via SSH (port 443)...${NC}"
     if [[ -n "${SSH_PID:-}" ]] && kill -0 "${SSH_PID}" 2>/dev/null; then
         kill "${SSH_PID}" 2>/dev/null || true
+        for _ in {1..10}; do
+            if ! kill -0 "${SSH_PID}" 2>/dev/null; then
+                break
+            fi
+            sleep 0.1
+        done
+        if kill -0 "${SSH_PID}" 2>/dev/null; then
+            kill -9 "${SSH_PID}" 2>/dev/null || true
+        fi
         wait "${SSH_PID}" 2>/dev/null || true
     fi
     : > "${LOG_FILE}"
 
     # Try a.pinggy.io first (more reliable thread capacity), fallback to free.pinggy.io
     PINGGY_HOST="a.pinggy.io"
-    stdbuf -oL ssh -p 443 -R0:localhost:"${LOCAL_PORT}" -T tcp@"${PINGGY_HOST}" \
+    SSH_CMD=(ssh -p 443 -R0:localhost:"${LOCAL_PORT}" -T tcp@"${PINGGY_HOST}" \
         -o StrictHostKeyChecking=no \
         -o ServerAliveInterval=30 \
-        -o ServerAliveCountMax=3 > "${LOG_FILE}" 2>&1 &
+        -o ServerAliveCountMax=3)
+    if command -v stdbuf &>/dev/null; then
+        stdbuf -oL "${SSH_CMD[@]}" > "${LOG_FILE}" 2>&1 200>&- &
+    elif command -v gstdbuf &>/dev/null; then
+        gstdbuf -oL "${SSH_CMD[@]}" > "${LOG_FILE}" 2>&1 200>&- &
+    else
+        "${SSH_CMD[@]}" > "${LOG_FILE}" 2>&1 200>&- &
+    fi
     SSH_PID=$!
 
     # Wait for handshake
@@ -502,5 +586,16 @@ while true; do
     done
 
     echo -e "${YELLOW}[!] Tunnel connection dropped or rotating. Restarting immediately...${NC}"
-    kill "${SSH_PID}" 2>/dev/null || true
+    if [[ -n "${SSH_PID:-}" ]] && kill -0 "${SSH_PID}" 2>/dev/null; then
+        kill "${SSH_PID}" 2>/dev/null || true
+        for _ in {1..10}; do
+            if ! kill -0 "${SSH_PID}" 2>/dev/null; then
+                break
+            fi
+            sleep 0.1
+        done
+        if kill -0 "${SSH_PID}" 2>/dev/null; then
+            kill -9 "${SSH_PID}" 2>/dev/null || true
+        fi
+    fi
 done

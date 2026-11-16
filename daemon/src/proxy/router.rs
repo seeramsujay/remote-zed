@@ -39,6 +39,8 @@ pub struct MessageRouter {
     pending_permissions: Arc<Mutex<HashMap<String, PendingPermission>>>,
     /// Active operational mode (e.g. "yolo", "auto", "plan").
     current_mode: Arc<RwLock<String>>,
+    /// Actively tracked session ID in flight between Zed and the agent.
+    pub active_session_id: Arc<RwLock<Option<String>>>,
 }
 
 impl MessageRouter {
@@ -58,7 +60,77 @@ impl MessageRouter {
             security,
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
             current_mode: Arc::new(RwLock::new("yolo".to_string())),
+            active_session_id: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Retrieves the active session ID, falling back to the newest discovered session log.
+    pub async fn get_active_session_id(&self) -> Option<String> {
+        let current = self.active_session_id.read().await.clone();
+        if current.is_some() {
+            return current;
+        }
+        let discovered = self.session_manager.get_latest_session_id().await;
+        if discovered.is_some() {
+            let mut write_lock = self.active_session_id.write().await;
+            *write_lock = discovered.clone();
+        }
+        discovered
+    }
+
+    /// Sets or updates the active session ID.
+    pub async fn set_active_session_id(&self, session_id: &str) {
+        if !session_id.is_empty() && session_id != "default" && session_id != "main-thread" {
+            let mut write_lock = self.active_session_id.write().await;
+            *write_lock = Some(session_id.to_string());
+        }
+    }
+
+    /// Dispatches an out-of-band push notification to the user's mobile device via Bunker ntfy topics.
+    pub fn trigger_bunker_ntfy(title: &str, body: &str, tags: &str, priority: &str) {
+        let title_owned = title.to_string();
+        let body_owned = body.to_string();
+        let tags_owned = tags.to_string();
+        let prio_owned = priority.to_string();
+        tokio::spawn(async move {
+            let home = match std::env::var("HOME") {
+                Ok(h) => h,
+                Err(_) => return,
+            };
+            let bunker_path = std::path::Path::new(&home).join(".zed-remote/bunker.json");
+            if !bunker_path.exists() {
+                return;
+            }
+            let content = match tokio::fs::read_to_string(&bunker_path).await {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+            let json_val: serde_json::Value = match serde_json::from_str(&content) {
+                Ok(v) => v,
+                Err(_) => return,
+            };
+            let topic = match json_val.get("ntfy_topic").and_then(|t| t.as_str()) {
+                Some(t) => t,
+                None => return,
+            };
+
+            let servers = ["https://ntfy.sh", "https://ntfy.adminforge.de", "https://ntfy.tedomum.fr"];
+            for srv in servers {
+                let url = format!("{}/{}", srv, topic);
+                let _ = tokio::process::Command::new("curl")
+                    .args([
+                        "-fsSL",
+                        "-X", "POST",
+                        "-H", &format!("Title: {}", title_owned),
+                        "-H", &format!("Priority: {}", prio_owned),
+                        "-H", &format!("Tags: {}", tags_owned),
+                        "-d", &body_owned,
+                        &url,
+                    ])
+                    .output()
+                    .await;
+            }
+        });
     }
 
     /// Returns the currently active operational mode (e.g. "yolo", "auto", "plan").
@@ -208,6 +280,9 @@ impl MessageRouter {
         if let Ok(msg) = JsonRpcMessage::parse(trimmed) {
             match &msg {
                 JsonRpcMessage::Request(req) => {
+                    if let Some(session_id) = req.params.get("sessionId").or_else(|| req.params.get("session_id")).and_then(|v| v.as_str()) {
+                        self.set_active_session_id(session_id).await;
+                    }
                     if req.method == "session/prompt" {
                         if let Some(session_id) = req.params.get("sessionId").and_then(|v| v.as_str()) {
                             let _ = self.session_manager.acquire_prompt_lock(session_id).await;
@@ -253,17 +328,31 @@ impl MessageRouter {
                 JsonRpcMessage::Notification(notif) => {
                     if notif.method == "session/update" {
                         if let Some(session_id) = notif.params.get("sessionId").and_then(|v| v.as_str()) {
+                            self.set_active_session_id(session_id).await;
                             self.session_manager
                                 .log_event(session_id, MessageDirection::AgentToZed, &serde_json::to_value(notif).unwrap_or_default())
                                 .await;
 
                             // Check if turn finished to release writer lock
                             if let Some(update_type) = notif.params.get("update")
-                                .and_then(|u| u.get("sessionUpdateType"))
+                                .and_then(|u| u.get("sessionUpdateType").or_else(|| u.get("sessionUpdate")))
                                 .and_then(|t| t.as_str())
                             {
                                 if update_type == "turn_completed" {
                                     self.session_manager.release_prompt_lock(session_id).await;
+                                    // Broadcast completion SSE to mobile clients
+                                    let completion_sse = format!(
+                                        "event: thread_completed\ndata: {}\n\n",
+                                        serde_json::json!({
+                                            "project_id": "current-project",
+                                            "project_name": "remote-zed",
+                                            "thread_id": session_id,
+                                            "thread_title": "AntiGravity Turn Completed",
+                                            "turn_id": format!("turn-{}", uuid::Uuid::new_v4())
+                                        })
+                                    );
+                                    let _ = self.mobile_broadcast_tx.send(completion_sse);
+                                    Self::trigger_bunker_ntfy("AntiGravity Task Finished", "Turn completed on remote-zed", "robot,check", "default");
                                 }
                             }
                         }
@@ -278,6 +367,8 @@ impl MessageRouter {
                             .and_then(|v| v.as_str())
                             .unwrap_or("default")
                             .to_string();
+
+                        self.set_active_session_id(&session_id).await;
 
                         let tool_call = req.params.get("toolCall").or_else(|| req.params.get("tool_call"));
                         let tool_call_id = tool_call
@@ -316,6 +407,19 @@ impl MessageRouter {
                             .and_then(|o| o.as_array())
                             .cloned()
                             .unwrap_or_default();
+
+                        // Broadcast question/approval SSE event to mobile clients
+                        let question_sse = format!(
+                            "event: thread_question\ndata: {}\n\n",
+                            serde_json::json!({
+                                "project_id": "current-project",
+                                "project_name": "remote-zed",
+                                "thread_id": session_id,
+                                "thread_title": format!("Approval required: {}", tool_name),
+                                "turn_id": tool_call_id
+                            })
+                        );
+                        let _ = self.mobile_broadcast_tx.send(question_sse);
 
                         let mode = self.current_mode.read().await.clone();
                         if mode == "yolo" {
@@ -371,6 +475,14 @@ impl MessageRouter {
 
                             return;
                         }
+
+                        // Send push notification when permission requires interactive user confirmation
+                        Self::trigger_bunker_ntfy(
+                            "Agent Approval Required",
+                            &format!("AntiGravity Agent needs permission: {}", tool_name),
+                            "warning,question",
+                            "high"
+                        );
 
                         let scoped_key = format!("{}:{}", session_id, tool_call_id);
                         let mut perms = self.pending_permissions.lock().await;
@@ -436,12 +548,29 @@ impl MessageRouter {
             JsonRpcMessage::Request(req) => {
                 match req.method.as_str() {
                     "session/prompt" => {
-                        let session_id = req.params.get("sessionId")
+                        let raw_session_id = req.params.get("sessionId")
                             .and_then(|v| v.as_str())
                             .unwrap_or("default");
 
+                        let session_id = if raw_session_id == "default" || raw_session_id == "main-thread" {
+                            self.get_active_session_id().await.unwrap_or_else(|| "default".to_string())
+                        } else {
+                            raw_session_id.to_string()
+                        };
+
+                        // Rewrite payload with resolved session_id if needed
+                        let prompt_payload = if session_id != raw_session_id {
+                            let mut new_req = req.clone();
+                            if let Some(map) = new_req.params.as_object_mut() {
+                                map.insert("sessionId".to_string(), serde_json::Value::String(session_id.clone()));
+                            }
+                            serde_json::to_string(&new_req).unwrap_or_else(|_| trimmed.to_string())
+                        } else {
+                            trimmed.to_string()
+                        };
+
                         // Concurrency check: enforce single-writer lock
-                        if let Err(e) = self.session_manager.acquire_prompt_lock(session_id).await {
+                        if let Err(e) = self.session_manager.acquire_prompt_lock(&session_id).await {
                             warn!("Concurrent prompt rejected: {}", e);
                             return Some(
                                 serde_json::to_string(&JsonRpcResponse::error(
@@ -455,13 +584,13 @@ impl MessageRouter {
 
                         // Log event
                         self.session_manager
-                            .log_event(session_id, MessageDirection::MobileToAgent, &serde_json::to_value(&req).unwrap_or_default())
+                            .log_event(&session_id, MessageDirection::MobileToAgent, &serde_json::to_value(&req).unwrap_or_default())
                             .await;
 
                         // Forward prompt to agent stdin
-                        if let Err(e) = self.agent_stdin_tx.send(format_ndjson_line(trimmed)).await {
+                        if let Err(e) = self.agent_stdin_tx.send(format_ndjson_line(&prompt_payload)).await {
                             error!("Failed to route mobile prompt to agent: {}", e);
-                            self.session_manager.release_prompt_lock(session_id).await;
+                            self.session_manager.release_prompt_lock(&session_id).await;
                             return Some(
                                 serde_json::to_string(&JsonRpcResponse::error(
                                     req.id,
@@ -472,11 +601,14 @@ impl MessageRouter {
                             );
                         }
 
+                        // Also mirror to Zed stdout so desktop session updates stay in sync
+                        let _ = self.zed_stdout_tx.send(format_ndjson_line(&prompt_payload)).await;
+
                         // Acknowledge request receipt to mobile
                         Some(
                             serde_json::to_string(&JsonRpcResponse::success(
                                 req.id,
-                                serde_json::json!({ "status": "dispatched" }),
+                                serde_json::json!({ "status": "dispatched", "sessionId": session_id }),
                             ))
                             .unwrap_or_default(),
                         )

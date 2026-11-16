@@ -1,6 +1,7 @@
 package dev.zed.mobile
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -92,6 +93,7 @@ fun FilesScreen(
     var currentPath by remember { mutableStateOf(initialPath?.ifBlank { "~/Projects" } ?: "~/Projects") }
     var parentPath by remember { mutableStateOf<String?>(null) }
     val files = remember { mutableStateListOf<RemoteFileItem>() }
+    val trustedPaths = remember { mutableStateListOf<String>() }
     var loading by remember { mutableStateOf(false) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var newFolderName by remember { mutableStateOf("") }
@@ -139,7 +141,8 @@ fun FilesScreen(
                         val name = newFolderName.trim()
                         if (name.isNotEmpty()) {
                             scope.launch {
-                                onCreateFolder(name)
+                                val targetPath = if (currentPath.endsWith("/")) "$currentPath$name" else "$currentPath/$name"
+                                onCreateFolder(targetPath)
                                 showNewFolderDialog = false
                                 newFolderName = ""
                                 loadDir(currentPath)
@@ -247,8 +250,11 @@ fun FilesScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         FilledTonalButton(
                             onClick = { showNewFolderDialog = true },
@@ -281,10 +287,14 @@ fun FilesScreen(
                             Text("Set Workspace", style = MaterialTheme.typography.labelMedium)
                         }
 
+                        val isTrusted = currentPath in trustedPaths
                         OutlinedButton(
                             onClick = {
                                 scope.launch {
                                     onTrustDirectory(currentPath)
+                                    if (currentPath !in trustedPaths) {
+                                        trustedPaths.add(currentPath)
+                                    }
                                     statusMessage = "Explicitly trusted: $currentPath"
                                 }
                             },
@@ -294,11 +304,23 @@ fun FilesScreen(
                                 imageVector = Icons.Default.Security,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp),
-                                tint = androidx.compose.ui.graphics.Color(0xFF34D399),
+                                tint = if (isTrusted) Color(0xFF34D399) else MaterialTheme.colorScheme.primary,
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Trust", style = MaterialTheme.typography.labelMedium)
+                            Text(if (isTrusted) "Trusted ✓" else "Trust Workspace", style = MaterialTheme.typography.labelMedium)
                         }
+                    }
+
+                    statusMessage?.let { msg ->
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = msg,
+                            style = TextStyle(
+                                fontFamily = MonoFamily,
+                                fontSize = 11.5.sp,
+                                color = Color(0xFF34D399),
+                            ),
+                        )
                     }
                 }
             }
