@@ -169,9 +169,9 @@ impl MessageRouter {
                 None => return,
             };
 
-            let servers = ["https://ntfy.sh", "https://ntfy.adminforge.de", "https://ntfy.tedomum.fr"];
+            let servers = ["https://ntfy.sh", "https://ntfy.adminforge.de"];
             for srv in servers {
-                let url = format!("{}/{}", srv, topic);
+                let url = format!("{}/{}-alerts", srv, topic);
                 let _ = tokio::process::Command::new("curl")
                     .args([
                         "-fsSL",

@@ -90,9 +90,8 @@ object BunkerTunnel {
     suspend fun resolveTunnelUrl(config: BunkerConfig, client: OkHttpClient = OkHttpClient()): String =
         withContext(Dispatchers.IO) {
             val servers = listOf(
-                "https://ntfy.adminforge.de",
                 "https://ntfy.sh",
-                "https://ntfy.tedomum.fr",
+                "https://ntfy.adminforge.de",
             )
             var lastError: Exception? = null
             for (server in servers) {
@@ -109,11 +108,17 @@ object BunkerTunnel {
                     }
 
                     val body = response.body?.string()?.trim() ?: continue
-                    val latestPayload = body.lines().map { it.trim() }.filter { it.isNotBlank() }.lastOrNull()
-                        ?: continue
-
-                    val decrypted = decryptAesGcm(latestPayload, config.encryptionKeyBase64)
-                    return@withContext normalizeOrigin(decrypted, config.port)
+                    val lines = body.lines().map { it.trim() }.filter { it.isNotBlank() }.reversed()
+                    for (candidate in lines) {
+                        try {
+                            val decrypted = decryptAesGcm(candidate, config.encryptionKeyBase64)
+                            if (decrypted.startsWith("tcp://") || decrypted.startsWith("http://") || decrypted.startsWith("https://") || decrypted.contains(":")) {
+                                return@withContext normalizeOrigin(decrypted, config.port)
+                            }
+                        } catch (_: Exception) {
+                            // Non-ciphertext payload (e.g., plaintext notification line); continue scanning older lines
+                        }
+                    }
                 } catch (e: Exception) {
                     lastError = e
                 }

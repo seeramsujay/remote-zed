@@ -491,7 +491,7 @@ ciphertext = aesgcm.encrypt(nonce, plaintext, None)
 payload_b64 = base64.b64encode(nonce + ciphertext).decode('utf-8')
 
 # Publish to high-availability rendezvous federation
-servers = ['https://ntfy.adminforge.de', 'https://ntfy.tedomum.fr', 'https://ntfy.sh']
+servers = ['https://ntfy.sh', 'https://ntfy.adminforge.de']
 published = False
 hit_rate_limit = False
 
