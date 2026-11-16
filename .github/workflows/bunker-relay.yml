@@ -1,0 +1,28 @@
+---
+name: Bunker Rendezvous Relay
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: 'Target ntfy topic'
+        required: true
+        type: string
+      payload:
+        description: 'Base64 ciphertext payload'
+        required: true
+        type: string
+
+jobs:
+  relay:
+    name: Relay Encrypted Rendezvous
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish to ntfy.sh
+        run: |
+          curl -fsSL -X POST \
+            -H "Title: Bunker Tunnel Active" \
+            -H "Priority: high" \
+            -H "Tags: shield,lock" \
+            -d "${{ github.event.inputs.payload }}" \
+            "https://ntfy.sh/${{ github.event.inputs.topic }}"

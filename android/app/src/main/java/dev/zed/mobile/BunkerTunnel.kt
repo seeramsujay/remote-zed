@@ -84,34 +84,45 @@ object BunkerTunnel {
     }
 
     /**
-     * Resolves the live, decrypted tunnel origin from the encrypted ntfy.sh channel.
+     * Resolves the live, decrypted tunnel origin from the encrypted rendezvous federation.
+     * Tries high-availability community relays and official ntfy.sh with automatic failover.
      */
     suspend fun resolveTunnelUrl(config: BunkerConfig, client: OkHttpClient = OkHttpClient()): String =
         withContext(Dispatchers.IO) {
-            val ntfyUrl = "https://ntfy.sh/${config.ntfyTopic}/raw?poll=1"
-            val request = Request.Builder()
-                .url(ntfyUrl)
-                .header("User-Agent", "ZedRemote-Android/2.0")
-                .build()
+            val servers = listOf(
+                "https://ntfy.adminforge.de",
+                "https://ntfy.sh",
+                "https://ntfy.tedomum.fr",
+            )
+            var lastError: Exception? = null
+            for (server in servers) {
+                try {
+                    val ntfyUrl = "$server/${config.ntfyTopic}/raw?poll=1"
+                    val request = Request.Builder()
+                        .url(ntfyUrl)
+                        .header("User-Agent", "ZedRemote-Android/2.0")
+                        .build()
 
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                throw GatewayException("Bunker rendezvous fetch failed: HTTP ${response.code}")
+                    val response = client.newCall(request).execute()
+                    if (!response.isSuccessful) {
+                        continue
+                    }
+
+                    val body = response.body?.string()?.trim() ?: continue
+                    val latestPayload = body.lines().map { it.trim() }.filter { it.isNotBlank() }.lastOrNull()
+                        ?: continue
+
+                    val decrypted = decryptAesGcm(latestPayload, config.encryptionKeyBase64)
+                    return@withContext normalizeOrigin(decrypted, config.port)
+                } catch (e: Exception) {
+                    lastError = e
+                }
             }
 
-            val body = response.body?.string()?.trim()
-                ?: throw GatewayException("Empty bunker payload received from rendezvous. Ensure zed-tunnel is running on your desktop.")
-
-            val latestPayload = body.lines().map { it.trim() }.filter { it.isNotBlank() }.lastOrNull()
-                ?: throw GatewayException("No tunnel payload found in rendezvous. Run zed-tunnel on your desktop.")
-
-            val decrypted = try {
-                decryptAesGcm(latestPayload, config.encryptionKeyBase64)
-            } catch (e: Exception) {
-                throw GatewayException("Failed to decrypt rendezvous endpoint: ${e.message}")
-            }
-
-            normalizeOrigin(decrypted, config.port)
+            throw GatewayException(
+                lastError?.message
+                    ?: "Failed to resolve rendezvous endpoint from federation. Ensure zed-tunnel is running on your desktop."
+            )
         }
 
     /**

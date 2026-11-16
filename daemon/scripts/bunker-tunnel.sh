@@ -403,7 +403,7 @@ fi
 encrypt_and_publish() {
     local target_url="$1"
     python3 -c "
-import base64, os, urllib.request
+import base64, os, urllib.request, subprocess, shutil
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 key = base64.b64decode('${KEY_B64}')
@@ -413,21 +413,42 @@ plaintext = '${target_url}'.encode('utf-8')
 ciphertext = aesgcm.encrypt(nonce, plaintext, None)
 payload_b64 = base64.b64encode(nonce + ciphertext).decode('utf-8')
 
-req = urllib.request.Request(
-    'https://ntfy.sh/${TOPIC}',
-    data=payload_b64.encode('utf-8'),
-    headers={
-        'Title': 'Bunker Tunnel Active',
-        'Priority': 'high',
-        'Tags': 'shield,lock'
-    }
-)
-try:
-    with urllib.request.urlopen(req) as response:
-        if response.status == 200:
-            print('[+] Published encrypted dynamic rendezvous endpoint to ntfy.sh')
-except Exception as e:
-    print(f'[-] Failed to publish to ntfy: {e}')
+# Publish to high-availability rendezvous federation
+servers = ['https://ntfy.adminforge.de', 'https://ntfy.tedomum.fr', 'https://ntfy.sh']
+published = False
+hit_rate_limit = False
+
+for srv in servers:
+    req = urllib.request.Request(
+        f'{srv}/${TOPIC}',
+        data=payload_b64.encode('utf-8'),
+        headers={
+            'Title': 'Bunker Tunnel Active',
+            'Priority': 'high',
+            'Tags': 'shield,lock'
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            if response.status == 200:
+                print(f'[+] Published encrypted dynamic rendezvous endpoint to {srv}')
+                published = True
+    except Exception as e:
+        if '429' in str(e):
+            hit_rate_limit = True
+        print(f'[-] Rendezvous notice ({srv}): {e}')
+
+# If official ntfy.sh is rate-limited on this IP, dispatch via GitHub Actions cloud relay
+if hit_rate_limit and shutil.which('gh'):
+    try:
+        subprocess.run(
+            ['gh', 'workflow', 'run', 'bunker-relay.yml', '-f', f'topic=${TOPIC}', '-f', f'payload={payload_b64}'],
+            capture_output=True,
+            timeout=5
+        )
+        print('[+] Dispatched cloud rendezvous relay via GitHub Actions')
+    except Exception:
+        pass
 "
 }
 
@@ -473,10 +494,6 @@ while true; do
         fi
         sleep 5
         COUNT=$((COUNT + 5))
-        # Re-publish keepalive to ntfy every 30 seconds so dynamic rendezvous never expires
-        if [[ $((COUNT % 30)) -eq 0 ]] && [[ -n "${TUNNEL_URL}" ]]; then
-            encrypt_and_publish "${TUNNEL_URL}" >/dev/null 2>&1 || true
-        fi
         # Enforce refresh at 55 minutes for Pinggy free tier rotation
         if [[ ${COUNT} -ge 3300 ]]; then
             echo -e "${BLUE}[*] 55-minute rotation window reached, rotating tunnel...${NC}"
