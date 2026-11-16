@@ -145,21 +145,25 @@ impl MessageRouter {
                 std::path::Path::new(&home).join(".config/zed-remote/bunker-session.json"),
                 std::path::Path::new(&home).join(".zed-remote/bunker.json"),
             ];
-            let mut topic_opt = None;
+            let mut found_topics: Vec<(std::time::SystemTime, String)> = Vec::new();
             for bunker_path in &candidates {
                 if bunker_path.exists() {
+                    let mtime = match tokio::fs::metadata(bunker_path).await {
+                        Ok(meta) => meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH),
+                        Err(_) => std::time::SystemTime::UNIX_EPOCH,
+                    };
                     if let Ok(content) = tokio::fs::read_to_string(bunker_path).await {
                         if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&content) {
                             if let Some(t) = json_val.get("ntfy_topic").and_then(|t| t.as_str()) {
-                                topic_opt = Some(t.to_string());
-                                break;
+                                found_topics.push((mtime, t.to_string()));
                             }
                         }
                     }
                 }
             }
-            let topic = match topic_opt {
-                Some(t) => t,
+            found_topics.sort_by(|a, b| b.0.cmp(&a.0));
+            let topic = match found_topics.into_iter().next() {
+                Some((_, t)) => t,
                 None => return,
             };
 
@@ -169,6 +173,8 @@ impl MessageRouter {
                 let _ = tokio::process::Command::new("curl")
                     .args([
                         "-fsSL",
+                        "--max-time", "5",
+                        "--connect-timeout", "2",
                         "-X", "POST",
                         "-H", &format!("Title: {}", title_owned),
                         "-H", &format!("Priority: {}", prio_owned),
