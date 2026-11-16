@@ -97,19 +97,24 @@ impl MessageRouter {
                 Ok(h) => h,
                 Err(_) => return,
             };
-            let bunker_path = std::path::Path::new(&home).join(".zed-remote/bunker.json");
-            if !bunker_path.exists() {
-                return;
+            let candidates = [
+                std::path::Path::new(&home).join(".config/zed-remote/bunker-session.json"),
+                std::path::Path::new(&home).join(".zed-remote/bunker.json"),
+            ];
+            let mut topic_opt = None;
+            for bunker_path in &candidates {
+                if bunker_path.exists() {
+                    if let Ok(content) = tokio::fs::read_to_string(bunker_path).await {
+                        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&content) {
+                            if let Some(t) = json_val.get("ntfy_topic").and_then(|t| t.as_str()) {
+                                topic_opt = Some(t.to_string());
+                                break;
+                            }
+                        }
+                    }
+                }
             }
-            let content = match tokio::fs::read_to_string(&bunker_path).await {
-                Ok(c) => c,
-                Err(_) => return,
-            };
-            let json_val: serde_json::Value = match serde_json::from_str(&content) {
-                Ok(v) => v,
-                Err(_) => return,
-            };
-            let topic = match json_val.get("ntfy_topic").and_then(|t| t.as_str()) {
+            let topic = match topic_opt {
                 Some(t) => t,
                 None => return,
             };
@@ -601,8 +606,6 @@ impl MessageRouter {
                             );
                         }
 
-                        // Also mirror to Zed stdout so desktop session updates stay in sync
-                        let _ = self.zed_stdout_tx.send(format_ndjson_line(&prompt_payload)).await;
 
                         // Acknowledge request receipt to mobile
                         Some(
