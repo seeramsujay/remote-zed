@@ -336,7 +336,7 @@ internal fun quietSwitchColors() = SwitchDefaults.colors(
 @Composable
 internal fun HomeScreen(state: MobileState, vm: ZedViewModel) {
     val activeProject = state.projects.firstOrNull { it.isOpen } ?: state.projects.firstOrNull()
-    val activeChat = state.recents.firstOrNull { activeProject != null && it.projectId == activeProject.id }
+    val activeChat = state.recents.firstOrNull { activeProject != null && it.project.id == activeProject.id }
         ?: state.recents.firstOrNull()
 
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 4.dp, bottom = 120.dp)) {
