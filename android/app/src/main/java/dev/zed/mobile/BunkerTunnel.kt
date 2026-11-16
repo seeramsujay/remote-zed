@@ -204,7 +204,7 @@ object BunkerTunnel {
     /**
      * Normalizes a raw tunnel string (e.g. "tcp://t.pinggy.io:44551" or "http://...") into an HTTP origin.
      */
-    private fun normalizeOrigin(raw: String, fallbackPort: Int): String {
+    fun normalizeOrigin(raw: String, fallbackPort: Int): String {
         val cleaned = raw.removePrefix("tcp://").removePrefix("ssl://").trim()
         return if (cleaned.startsWith("http://") || cleaned.startsWith("https://")) {
             cleaned
