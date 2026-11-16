@@ -530,9 +530,14 @@ if hit_rate_limit and shutil.which('gh'):
 "
 }
 
+# Candidate Pinggy regional clusters for automatic failover
+CANDIDATE_HOSTS=("ap.a.pinggy.io" "us.a.pinggy.io" "eu.a.pinggy.io" "a.pinggy.io" "free.pinggy.io")
+HOST_INDEX=0
+
 # Main tunnel loop (Pinggy sessions refresh automatically every 55 minutes on free tier)
 while true; do
-    echo -e "${BLUE}[*] Initializing fresh reverse tunnel via SSH (port 443)...${NC}"
+    PINGGY_HOST="${CANDIDATE_HOSTS[$HOST_INDEX]}"
+    echo -e "${BLUE}[*] Initializing fresh reverse tunnel via SSH to ${PINGGY_HOST} (port 443)...${NC}"
     if [[ -n "${SSH_PID:-}" ]] && kill -0 "${SSH_PID}" 2>/dev/null; then
         kill "${SSH_PID}" 2>/dev/null || true
         for _ in {1..10}; do
@@ -548,10 +553,9 @@ while true; do
     fi
     : > "${LOG_FILE}"
 
-    # Try a.pinggy.io first (more reliable thread capacity), fallback to free.pinggy.io
-    PINGGY_HOST="a.pinggy.io"
     SSH_CMD=(ssh -p 443 -R0:localhost:"${LOCAL_PORT}" -T tcp@"${PINGGY_HOST}" \
         -o StrictHostKeyChecking=no \
+        -o ConnectTimeout=8 \
         -o ServerAliveInterval=30 \
         -o ServerAliveCountMax=3)
     if command -v stdbuf &>/dev/null; then
@@ -563,18 +567,27 @@ while true; do
     fi
     SSH_PID=$!
 
-    # Wait for handshake
-    sleep 5
-
-    # Extract dynamic URL
-    TUNNEL_URL=$(grep -oE "(tcp|http|https)://[a-zA-Z0-9.-]+:[0-9]+" "${LOG_FILE}" | head -n 1 || true)
+    # Wait for handshake (poll up to 8 seconds)
+    TUNNEL_URL=""
+    for _ in {1..8}; do
+        sleep 1
+        TUNNEL_URL=$(grep -oE "(tcp|http|https)://[a-zA-Z0-9.-]+:[0-9]+" "${LOG_FILE}" | head -n 1 || true)
+        if [[ -n "${TUNNEL_URL}" ]]; then
+            break
+        fi
+        if ! kill -0 "${SSH_PID}" 2>/dev/null; then
+            break
+        fi
+    done
 
     if [[ -n "${TUNNEL_URL}" ]]; then
         echo -e "${GREEN}${BOLD}[+] Tunnel is LIVE: ${TUNNEL_URL}${NC}"
         encrypt_and_publish "${TUNNEL_URL}"
     else
-        echo -e "${YELLOW}[-] Tunnel address pending or error. Log contents:${NC}"
+        echo -e "${YELLOW}[-] Tunnel address pending or error on ${PINGGY_HOST}. Log contents:${NC}"
         head -n 10 "${LOG_FILE}"
+        # Rotate candidate host on failure
+        HOST_INDEX=$(( (HOST_INDEX + 1) % ${#CANDIDATE_HOSTS[@]} ))
     fi
 
     COUNT=0
@@ -607,5 +620,10 @@ while true; do
         if kill -0 "${SSH_PID}" 2>/dev/null; then
             kill -9 "${SSH_PID}" 2>/dev/null || true
         fi
+    fi
+    # If tunnel died prematurely (under 30s), rotate host and back off slightly
+    if [[ ${COUNT} -lt 30 ]]; then
+        HOST_INDEX=$(( (HOST_INDEX + 1) % ${#CANDIDATE_HOSTS[@]} ))
+        sleep 2
     fi
 done
