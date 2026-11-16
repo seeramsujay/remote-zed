@@ -4,7 +4,9 @@ use crate::error::{DaemonError, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use tokio::process::Command;
+use tokio::sync::Mutex;
 use tracing::{debug, info};
 
 /// Status of an individual tracked or untracked file in the repository.
@@ -58,12 +60,16 @@ pub struct GitCommitInfo {
 #[derive(Clone, Debug)]
 pub struct GitEngine {
     workspace_root: PathBuf,
+    mutation_lock: Arc<Mutex<()>>,
 }
 
 impl GitEngine {
     /// Initializes a GitEngine anchored at `workspace_root`.
     pub fn new(workspace_root: PathBuf) -> Self {
-        Self { workspace_root }
+        Self {
+            workspace_root,
+            mutation_lock: Arc::new(Mutex::new(())),
+        }
     }
 
     /// Helper to execute a git command in the repository workspace.
@@ -113,14 +119,18 @@ impl GitEngine {
             let worktree_status = token.chars().nth(1).unwrap_or(' ');
             let file_path = &token[3..];
 
-            // In git status -z porcelain, rename records put the new path first, then old path in the next token
-            let path_to_use = if index_status == 'R' || worktree_status == 'R' {
+            // In git status -z porcelain, rename (R) and copy (C) records put the new path first, then old path in the next token
+            let is_rename_or_copy = index_status == 'R' || worktree_status == 'R' || index_status == 'C' || worktree_status == 'C';
+            let old_path = if is_rename_or_copy {
                 if idx < tokens.len() && !tokens[idx].is_empty() {
-                    idx += 1; // skip old path record
+                    let p = tokens[idx].to_string();
+                    idx += 1; // consume source pathname token
+                    Some(p)
+                } else {
+                    None
                 }
-                file_path.to_string()
             } else {
-                file_path.to_string()
+                None
             };
 
             let staged = index_status != ' ' && index_status != '?';
@@ -130,18 +140,32 @@ impl GitEngine {
                 ('M', _) | (_, 'M') => "modified",
                 ('D', _) | (_, 'D') => "deleted",
                 ('R', _) | (_, 'R') => "renamed",
+                ('C', _) | (_, 'C') => "copied",
                 ('U', _) | (_, 'U') => "conflict",
                 _ => "modified",
             };
 
-            if !path_to_use.is_empty() {
+            if !file_path.is_empty() {
                 files.push(GitFileStatus {
-                    path: path_to_use,
+                    path: file_path.to_string(),
                     status: status_label.to_string(),
                     staged,
                     insertions: 0,
                     deletions: 0,
                 });
+            }
+
+            // For renames, also retain the original path so operations such as Unstage All supply both paths
+            if let Some(src) = old_path {
+                if !src.is_empty() && (index_status == 'R' || worktree_status == 'R') {
+                    files.push(GitFileStatus {
+                        path: src,
+                        status: "renamed-orig".to_string(),
+                        staged,
+                        insertions: 0,
+                        deletions: 0,
+                    });
+                }
             }
         }
 
@@ -189,6 +213,7 @@ impl GitEngine {
 
     /// Stages specific file paths (`git add <path>`).
     pub async fn stage(&self, paths: &[String]) -> Result<()> {
+        let _guard = self.mutation_lock.lock().await;
         if paths.is_empty() {
             return Ok(());
         }
@@ -203,6 +228,7 @@ impl GitEngine {
 
     /// Commits changes with a user-supplied message, optionally staging all changes beforehand.
     pub async fn commit(&self, message: &str, stage_all: bool) -> Result<GitCommitResult> {
+        let _guard = self.mutation_lock.lock().await;
         if stage_all {
             self.run_git(&["add", "-A"]).await?;
         }
@@ -235,6 +261,7 @@ impl GitEngine {
 
     /// Unstages specific files (`git restore --staged <paths>` or `git rm --cached` if no HEAD yet).
     pub async fn unstage(&self, paths: &[String]) -> Result<()> {
+        let _guard = self.mutation_lock.lock().await;
         if paths.is_empty() {
             return Ok(());
         }
@@ -254,8 +281,41 @@ impl GitEngine {
 
     /// Checks out or switches to a branch.
     pub async fn checkout(&self, branch: &str) -> Result<String> {
-        info!("Checking out branch {}", branch);
-        let out = self.run_git(&["checkout", branch]).await?;
+        let _guard = self.mutation_lock.lock().await;
+        let clean_branch = branch.trim();
+        if clean_branch.is_empty() {
+            return Err(DaemonError::Git("Branch name cannot be empty".to_string()));
+        }
+        info!("Switching to branch {}", clean_branch);
+
+        // Handle remote tracking branches (e.g. "origin/topic" or "remotes/origin/topic")
+        if clean_branch.starts_with("origin/") || clean_branch.starts_with("remotes/origin/") {
+            let local_name = clean_branch
+                .trim_start_matches("remotes/")
+                .trim_start_matches("origin/");
+            let local_ref = format!("refs/heads/{}", local_name);
+            let has_local = self.run_git(&["rev-parse", "--verify", &local_ref]).await.is_ok();
+
+            if has_local {
+                let out = match self.run_git(&["switch", local_name]).await {
+                    Ok(o) => o,
+                    Err(_) => self.run_git(&["checkout", local_name, "--"]).await?,
+                };
+                return Ok(out);
+            } else {
+                let out = match self.run_git(&["switch", "-c", local_name, "--track", clean_branch]).await {
+                    Ok(o) => o,
+                    Err(_) => self.run_git(&["checkout", "-b", local_name, "--track", clean_branch, "--"]).await?,
+                };
+                return Ok(out);
+            }
+        }
+
+        // Branch-only switch with path ambiguity guard
+        let out = match self.run_git(&["switch", clean_branch]).await {
+            Ok(o) => o,
+            Err(_) => self.run_git(&["checkout", clean_branch, "--"]).await?,
+        };
         Ok(out)
     }
 

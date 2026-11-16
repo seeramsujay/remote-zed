@@ -185,14 +185,14 @@ impl MessageRouter {
                 }
                 JsonRpcMessage::Response(res) => {
                     // Look up and remove matching pending permission entry when resolved by desktop response
-                    let mut approvals = self.pending_approvals.write().await;
-                    let found_id = approvals
+                    let mut perms = self.pending_permissions.lock().await;
+                    let found_id = perms
                         .iter()
                         .find(|(_, p)| p.request_id == res.id)
                         .map(|(k, _)| k.clone());
                     if let Some(tool_call_id) = found_id {
-                        approvals.remove(&tool_call_id);
-                        info!("Removed pending approval {} resolved by desktop response id {:?}", tool_call_id, res.id);
+                        perms.remove(&tool_call_id);
+                        info!("Removed pending permission {} resolved by desktop response id {:?}", tool_call_id, res.id);
                     }
                 }
                 _ => {}

@@ -118,7 +118,7 @@ fun GitScreen(
             text = {
                 LazyColumn(modifier = Modifier.fillMaxWidth()) {
                     items(state.gitBranches) { b ->
-                        val isCurrent = b == branch || b.endsWith("/$branch")
+                        val isCurrent = b == branch || (b.startsWith("origin/") && b.removePrefix("origin/") == branch)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()

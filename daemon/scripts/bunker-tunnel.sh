@@ -280,6 +280,32 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+HAS_LOCK=false
+cleanup() {
+    echo ""
+    echo -e "${YELLOW}[*] Shutting down pinggy tunnel...${NC}"
+    if [[ -n "${SSH_PID:-}" ]] && kill -0 "${SSH_PID}" 2>/dev/null; then
+        kill "${SSH_PID}" 2>/dev/null || true
+        wait "${SSH_PID}" 2>/dev/null || true
+    fi
+    if [[ "$HAS_LOCK" = true ]]; then
+        rm -f "${PID_FILE}"
+    fi
+    exit 0
+}
+trap cleanup SIGINT SIGTERM EXIT
+
+# Acquire exclusive lock BEFORE credential mutation (--reset) or supervisor startup
+exec 200>"${LOCK_FILE}"
+if ! flock -n 200; then
+    echo -e "${RED}[!] Another zed-tunnel supervisor is already running.${NC}"
+    echo -e "${YELLOW}[*] Check status with: zed-tunnel -s"
+    echo -e "    To stop or reset:  zed-tunnel --stop${NC}"
+    exit 1
+fi
+HAS_LOCK=true
+echo $$ > "${PID_FILE}"
+
 if [[ "$DAEMON_MODE" = false ]]; then
     echo -e "${CYAN}${BOLD}"
     cat << 'EOF'
@@ -360,18 +386,6 @@ qr.print_ascii(invert=True)
     echo ""
 fi
 
-cleanup() {
-    echo ""
-    echo -e "${YELLOW}[*] Shutting down pinggy tunnel...${NC}"
-    if [[ -n "${SSH_PID:-}" ]] && kill -0 "${SSH_PID}" 2>/dev/null; then
-        kill "${SSH_PID}" 2>/dev/null || true
-        wait "${SSH_PID}" 2>/dev/null || true
-    fi
-    rm -f "${PID_FILE}"
-    exit 0
-}
-trap cleanup SIGINT SIGTERM EXIT
-
 encrypt_and_publish() {
     local target_url="$1"
     python3 -c "
@@ -402,15 +416,6 @@ except Exception as e:
     print(f'[-] Failed to publish to ntfy: {e}')
 "
 }
-
-# Acquire exclusive lock to prevent concurrent supervisors from colliding
-exec 200>"${LOCK_FILE}"
-if ! flock -n 200; then
-    echo -e "${RED}[!] Another zed-tunnel supervisor is already running.${NC}"
-    echo -e "${YELLOW}[*] Check status with: zed-tunnel -s${NC}"
-    exit 1
-fi
-echo $$ > "${PID_FILE}"
 
 # Main tunnel loop (Pinggy sessions refresh automatically every 55 minutes on free tier)
 while true; do
