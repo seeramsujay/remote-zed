@@ -109,12 +109,21 @@ ln -sf "${INSTALL_ROOT}/tools/bunker-tunnel.sh" "${HOME}/.local/bin/zed-tunnel"
 ln -sf "${INSTALL_ROOT}/tools/bunker-tunnel.sh" "${HOME}/.local/bin/zedt"
 ln -sf "${INSTALL_ROOT}/tools/inject-daemon.sh" "${HOME}/.local/bin/zed-inject"
 
+AUTO_YES=false
+for arg in "$@"; do
+    case "$arg" in
+        -y|--yes|--default) AUTO_YES=true ;;
+    esac
+done
+
 # 5. Shell Alias Option (zedt)
 echo -e "${BLUE}${BOLD}[*] Step 5/6: Configuring Shell Shorthand (zedt)...${NC}"
 PROMPT_ALIAS="y"
-if [ -t 0 ]; then
+if [[ "$AUTO_YES" = true ]]; then
+    PROMPT_ALIAS="y"
+elif [ -t 0 ]; then
     read -r -p "Would you like to configure shell alias 'zedt' for faster access? [Y/n]: " PROMPT_ALIAS || PROMPT_ALIAS="y"
-elif [ -e /dev/tty ]; then
+elif [ -t 1 ] && [ -e /dev/tty ]; then
     read -r -p "Would you like to configure shell alias 'zedt' for faster access? [Y/n]: " PROMPT_ALIAS < /dev/tty || PROMPT_ALIAS="y"
 fi
 
@@ -132,10 +141,12 @@ fi
 # 6. Systemd Service Option
 echo -e "${BLUE}${BOLD}[*] Step 6/6: Configuring Startup & Systemd Service...${NC}"
 PROMPT_ANSWER="n"
-if [ -t 0 ]; then
+if [[ "$AUTO_YES" = true ]]; then
+    PROMPT_ANSWER="n"
+elif [ -t 0 ]; then
     # Interactive terminal
     read -r -p "Would you like to run zed-tunnel as a systemd user service automatically on startup? [y/N]: " PROMPT_ANSWER || PROMPT_ANSWER="n"
-elif [ -e /dev/tty ]; then
+elif [ -t 1 ] && [ -e /dev/tty ]; then
     # Piped curl into bash, but user has interactive tty attached
     read -r -p "Would you like to run zed-tunnel as a systemd user service automatically on startup? [y/N]: " PROMPT_ANSWER < /dev/tty || PROMPT_ANSWER="n"
 fi
