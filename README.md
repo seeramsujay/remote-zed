@@ -42,7 +42,7 @@ Instead of streaming pixels, Zed Remote intercepts the **Agent Client Protocol (
 
 ---
 
-## ✨ Key Features <a id="key-features"></a>
+## ✨ Key Features
 
 | Feature | Description |
 | :--- | :--- |
@@ -56,7 +56,7 @@ Instead of streaming pixels, Zed Remote intercepts the **Agent Client Protocol (
 
 ---
 
-## 🏗️ Architecture <a id="architecture"></a>
+## 🏗️ Architecture
 
 Zed Remote places a lightweight proxy daemon between Zed and your AI agent executable, with an encrypted rendezvous for mobile devices:
 
@@ -96,7 +96,7 @@ Zed Remote places a lightweight proxy daemon between Zed and your AI agent execu
 
 ---
 
-## 🚀 Quick Start <a id="quick-start"></a>
+## 🚀 Quick Start
 
 ### ⚡ Complete One-Line Install (Laptop)
 
@@ -132,7 +132,7 @@ zed-tunnel --update           # Update Zed Remote to latest release
 
 ---
 
-### 📱 Mobile App Setup <a id="mobile-app-setup"></a>
+### 📱 Mobile App Setup
 
 - 🤖 **Native Jetpack Compose**: Download **`zed-remote.apk`** for Android 12+ dynamic Material You colors, rapid UI rendering, full ACP AI streaming, mobile Git panel, and integrated terminal.
 *(Note: iOS Swift client is scheduled for v0.2.0; Flutter builds are paused).*
@@ -143,7 +143,7 @@ zed-tunnel --update           # Update Zed Remote to latest release
 
 ---
 
-## 🏰 Bunker Tunnel & Firewall Bypass <a id="bunker-tunnel-firewall-bypass"></a>
+## 🏰 Bunker Tunnel & Firewall Bypass
 
 Standard mesh overlays like Tailscale or WireGuard use UDP (port 41641), which enterprise networks, university hostels, and Fortinet egress firewalls routinely block or throttle via Deep Packet Inspection (DPI).
 
@@ -155,7 +155,7 @@ Standard mesh overlays like Tailscale or WireGuard use UDP (port 41641), which e
 
 ---
 
-## 🧩 Zero-Rebuild Integration with Official Zed <a id="zero-rebuild-integration-with-official-zed"></a>
+## 🧩 Zero-Rebuild Integration with Official Zed
 
 You never need to maintain a custom fork of Zed or compile Zed's 20GB+ Rust codebase on your laptop. Choose either integration option:
 
@@ -179,7 +179,7 @@ Symlinks the extension at `extensions/zed-remote` into Zed's dev extension path:
 
 ---
 
-## 📦 Releases & Cloud Builds <a id="releases-cloud-builds"></a>
+## 📦 Releases & Cloud Builds
 
 You don't need to heat up your laptop compiling binaries. GitHub Actions automatically builds and publishes releases on GitHub's cloud runners for free:
 
@@ -208,7 +208,7 @@ To build manually on your workstation:
 
 ---
 
-## 📂 Repository Structure <a id="repository-structure"></a>
+## 📂 Repository Structure
 
 ```
 remote-zed/
