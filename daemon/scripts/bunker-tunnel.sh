@@ -415,7 +415,7 @@ if [[ -f "${CONFIG_FILE}" ]] && [[ "$RESET_KEYS" = false ]]; then
 
         # Check if the active daemon running on the port is an outdated instance
         if command -v curl &>/dev/null; then
-            CHECK_RESP=$(curl -s --connect-timeout 1 -H "Authorization: Bearer ${TOKEN}" "http://127.0.0.1:${LOCAL_PORT}/v2/projects/default/threads" 2>/dev/null || echo "")
+            CHECK_RESP=$(curl -s --connect-timeout 1 -m 2 -H "Authorization: Bearer ${TOKEN}" "http://127.0.0.1:${LOCAL_PORT}/v2/projects/default/threads" 2>/dev/null || echo "")
             if echo "$CHECK_RESP" | grep -q "thread-1794814517197"; then
                 echo -e "${YELLOW}[!] WARNING: An outdated daemon (v0.1.2) is still held in memory by Zed Editor.${NC}"
                 echo -e "${YELLOW}[!] Please close and reopen Zed Editor on your laptop to load the updated daemon!${NC}\n"
