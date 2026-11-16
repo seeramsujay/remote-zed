@@ -168,6 +168,7 @@ data class MobileState(
     val gitBranches: List<String> = emptyList(),
     val gitCommits: List<GitCommitInfo> = emptyList(),
     val gitLoading: Boolean = false,
+    val lastActiveProject: Project? = null,
 ) {
     val threads: List<ThreadSummary> get() = project?.let { projectThreads[it.id] }.orEmpty()
     val agents: List<AgentInfo> get() = project?.let { projectAgents[it.id] }.orEmpty()
@@ -896,12 +897,43 @@ class ZedViewModel(
         if (!mutable.value.busy) navigate(Page.FILES)
     }
 
-    fun showGit() {
-        if (!mutable.value.busy) {
-            navigate(Page.GIT)
-            loadGitStatus()
-            loadGitLog()
+    fun openWorkspace(project: Project) {
+        val current = mutable.value
+        mutable.value = current.copy(
+            project = project,
+            lastActiveProject = project,
+        )
+        navigate(Page.PROJECTS)
+        repository?.let { repo ->
+            startThreadLoad(repo, listOf(project))
         }
+        loadGitStatus(project.path)
+    }
+
+    fun exitWorkspace() {
+        val current = mutable.value
+        mutable.value = current.copy(
+            project = null,
+        )
+        navigate(Page.PROJECTS)
+    }
+
+    fun showGit(project: Project? = null) {
+        if (!mutable.value.busy) {
+            val target = project ?: mutable.value.project ?: mutable.value.lastActiveProject ?: mutable.value.projects.firstOrNull()
+            if (target != null) {
+                mutable.value = mutable.value.copy(lastActiveProject = target)
+            }
+            navigate(Page.GIT)
+            loadGitStatus(target?.path)
+            loadGitLog(target?.path)
+        }
+    }
+
+    fun switchGitWorkspace(project: Project) {
+        mutable.value = mutable.value.copy(lastActiveProject = project)
+        loadGitStatus(project.path)
+        loadGitLog(project.path)
     }
 
     suspend fun executeTerminal(command: String): TerminalExecResponse {
@@ -1046,13 +1078,14 @@ class ZedViewModel(
         }
     }
 
-    fun loadGitStatus() {
+    fun loadGitStatus(path: String? = null) {
         val repo = repository ?: return
+        val targetPath = path ?: mutable.value.project?.path ?: mutable.value.lastActiveProject?.path
         viewModelScope.launch {
             mutable.value = mutable.value.copy(gitLoading = true)
             try {
-                val st = repo.gitStatus()
-                val br = repo.gitBranches()
+                val st = repo.gitStatus(targetPath)
+                val br = repo.gitBranches(targetPath)
                 if (repository !== repo) return@launch
                 mutable.value = mutable.value.copy(gitStatus = st, gitBranches = br, gitLoading = false)
             } catch (e: Exception) {
@@ -1062,12 +1095,13 @@ class ZedViewModel(
         }
     }
 
-    fun loadGitLog() {
+    fun loadGitLog(path: String? = null) {
         val repo = repository ?: return
+        val targetPath = path ?: mutable.value.project?.path ?: mutable.value.lastActiveProject?.path
         viewModelScope.launch {
             mutable.value = mutable.value.copy(gitLoading = true)
             try {
-                val log = repo.gitLogGraph()
+                val log = repo.gitLogGraph(targetPath)
                 if (repository !== repo) return@launch
                 mutable.value = mutable.value.copy(gitCommits = log, gitLoading = false)
             } catch (e: Exception) {
@@ -1077,15 +1111,16 @@ class ZedViewModel(
         }
     }
 
-    fun gitFetch() {
+    fun gitFetch(path: String? = null) {
         val repo = repository ?: return
+        val targetPath = path ?: mutable.value.project?.path ?: mutable.value.lastActiveProject?.path
         viewModelScope.launch {
             mutable.value = mutable.value.copy(gitLoading = true)
             try {
-                val output = repo.gitFetch()
-                val st = repo.gitStatus()
-                val br = repo.gitBranches()
-                val log = repo.gitLogGraph()
+                val output = repo.gitFetch(prune = true, path = targetPath)
+                val st = repo.gitStatus(targetPath)
+                val br = repo.gitBranches(targetPath)
+                val log = repo.gitLogGraph(targetPath)
                 if (repository !== repo) return@launch
                 mutable.value = mutable.value.copy(
                     gitStatus = st,
@@ -1101,11 +1136,12 @@ class ZedViewModel(
         }
     }
 
-    fun loadGitBranches() {
+    fun loadGitBranches(path: String? = null) {
         val repo = repository ?: return
+        val targetPath = path ?: mutable.value.project?.path ?: mutable.value.lastActiveProject?.path
         viewModelScope.launch {
             try {
-                val branches = repo.gitBranches()
+                val branches = repo.gitBranches(targetPath)
                 if (repository !== repo) return@launch
                 mutable.value = mutable.value.copy(gitBranches = branches)
             } catch (e: Exception) {
@@ -1117,10 +1153,11 @@ class ZedViewModel(
 
     fun stageGit(paths: List<String>) {
         val repo = repository ?: return
+        val targetPath = mutable.value.project?.path ?: mutable.value.lastActiveProject?.path
         viewModelScope.launch {
             try {
-                repo.gitStage(paths)
-                loadGitStatus()
+                repo.gitStage(paths, targetPath)
+                loadGitStatus(targetPath)
             } catch (e: Exception) {
                 mutable.value = mutable.value.copy(toast = "Stage error: ${e.message}")
             }
@@ -1129,10 +1166,11 @@ class ZedViewModel(
 
     fun unstageGit(paths: List<String>) {
         val repo = repository ?: return
+        val targetPath = mutable.value.project?.path ?: mutable.value.lastActiveProject?.path
         viewModelScope.launch {
             try {
-                repo.gitUnstage(paths)
-                loadGitStatus()
+                repo.gitUnstage(paths, targetPath)
+                loadGitStatus(targetPath)
             } catch (e: Exception) {
                 mutable.value = mutable.value.copy(toast = "Unstage error: ${e.message}")
             }
@@ -1141,15 +1179,16 @@ class ZedViewModel(
 
     fun commitGit(message: String, stageAll: Boolean = false, onSuccess: (() -> Unit)? = null) {
         val repo = repository ?: return
+        val targetPath = mutable.value.project?.path ?: mutable.value.lastActiveProject?.path
         if (message.isBlank()) {
             mutable.value = mutable.value.copy(toast = "Commit message cannot be empty")
             return
         }
         viewModelScope.launch {
             try {
-                val res = repo.gitCommit(message, stageAll)
-                loadGitStatus()
-                loadGitLog()
+                val res = repo.gitCommit(message, stageAll, targetPath)
+                loadGitStatus(targetPath)
+                loadGitLog(targetPath)
                 mutable.value = mutable.value.copy(toast = "Committed: ${res.commitHash}")
                 onSuccess?.invoke()
             } catch (e: Exception) {
@@ -1160,13 +1199,14 @@ class ZedViewModel(
 
     fun checkoutBranch(branch: String) {
         val repo = repository ?: return
+        val targetPath = mutable.value.project?.path ?: mutable.value.lastActiveProject?.path
         viewModelScope.launch {
             try {
                 mutable.value = mutable.value.copy(toast = "Switching to branch $branch...")
-                repo.gitCheckout(branch)
-                loadGitStatus()
-                loadGitLog()
-                loadGitBranches()
+                repo.gitCheckout(branch, targetPath)
+                loadGitStatus(targetPath)
+                loadGitLog(targetPath)
+                loadGitBranches(targetPath)
                 mutable.value = mutable.value.copy(toast = "Switched to branch $branch")
             } catch (e: Exception) {
                 mutable.value = mutable.value.copy(toast = "Failed to switch branch: ${e.message}")
@@ -1176,11 +1216,12 @@ class ZedViewModel(
 
     fun pushGit() {
         val repo = repository ?: return
+        val targetPath = mutable.value.project?.path ?: mutable.value.lastActiveProject?.path
         viewModelScope.launch {
             try {
                 mutable.value = mutable.value.copy(toast = "Pushing to remote...")
-                repo.gitPush()
-                loadGitStatus()
+                repo.gitPush(path = targetPath)
+                loadGitStatus(targetPath)
                 mutable.value = mutable.value.copy(toast = "Pushed changes successfully!")
             } catch (e: Exception) {
                 mutable.value = mutable.value.copy(toast = "Push error: ${e.message}")
@@ -1191,6 +1232,11 @@ class ZedViewModel(
     fun back() {
         if (mutable.value.busy) return
         when (mutable.value.page) {
+            Page.PROJECTS -> {
+                if (mutable.value.project != null) {
+                    exitWorkspace()
+                }
+            }
             Page.CHANGES -> navigate(Page.CHAT)
             Page.GIT -> navigate(if (mutable.value.selectedThread != null) Page.CHAT else Page.PROJECTS)
             Page.CHAT -> {

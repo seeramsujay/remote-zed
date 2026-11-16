@@ -277,10 +277,21 @@ private fun ZedTopBar(
     }
     when (state.page) {
         Page.PROJECTS -> CenterAlignedTopAppBar(
-            title = { Text("Zed", style = MaterialTheme.typography.titleLarge) },
+            title = {
+                Text(
+                    state.project?.name ?: "Zed Workspaces",
+                    style = MaterialTheme.typography.titleLarge,
+                )
+            },
             navigationIcon = {
-                IconButton(onClick = onOpenDrawer) {
-                    Icon(Symbols.Menu, contentDescription = "Open navigation menu", modifier = Modifier.size(22.dp))
+                if (state.project != null) {
+                    IconButton(onClick = vm::exitWorkspace) {
+                        Icon(Symbols.ArrowBack, contentDescription = "All Workspaces", modifier = Modifier.size(22.dp))
+                    }
+                } else {
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(Symbols.Menu, contentDescription = "Open navigation menu", modifier = Modifier.size(22.dp))
+                    }
                 }
             },
             colors = colors,

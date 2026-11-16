@@ -14,6 +14,10 @@ data class Project(
     val kind: String = PROJECT_KIND_LOCAL,
     val connectionName: String? = null,
     val opening: Boolean = false,
+    val isActiveWindow: Boolean = false,
+    val activeThreadTitle: String? = null,
+    val activeSessionId: String? = null,
+    val lastTimestamp: String? = null,
 )
 
 const val PROJECT_KIND_LOCAL = "local"
@@ -323,15 +327,15 @@ interface ZedRepository {
     suspend fun fsTrust(path: String): Unit = unsupported("Workspace trust")
 
     /** Native Git repository management */
-    suspend fun gitStatus(): GitStatusResult = unsupported("Git status")
-    suspend fun gitStage(paths: List<String>): Unit = unsupported("Git stage")
-    suspend fun gitUnstage(paths: List<String>): Unit = unsupported("Git unstage")
-    suspend fun gitCommit(message: String, stageAll: Boolean): GitCommitResult = unsupported("Git commit")
-    suspend fun gitPush(remote: String? = null, branch: String? = null): Unit = unsupported("Git push")
-    suspend fun gitFetch(remote: String? = null, prune: Boolean = true): String = unsupported("Git fetch")
-    suspend fun gitBranches(): List<String> = unsupported("Git branches")
-    suspend fun gitCheckout(branch: String): Unit = unsupported("Git checkout")
-    suspend fun gitLogGraph(): List<GitCommitInfo> = unsupported("Git log")
+    suspend fun gitStatus(path: String? = null): GitStatusResult = unsupported("Git status")
+    suspend fun gitStage(paths: List<String>, path: String? = null): Unit = unsupported("Git stage")
+    suspend fun gitUnstage(paths: List<String>, path: String? = null): Unit = unsupported("Git unstage")
+    suspend fun gitCommit(message: String, stageAll: Boolean, path: String? = null): GitCommitResult = unsupported("Git commit")
+    suspend fun gitPush(remote: String? = null, branch: String? = null, path: String? = null): Unit = unsupported("Git push")
+    suspend fun gitFetch(remote: String? = null, prune: Boolean = true, path: String? = null): String = unsupported("Git fetch")
+    suspend fun gitBranches(path: String? = null): List<String> = unsupported("Git branches")
+    suspend fun gitCheckout(branch: String, path: String? = null): Unit = unsupported("Git checkout")
+    suspend fun gitLogGraph(path: String? = null): List<GitCommitInfo> = unsupported("Git log")
 
     private fun <T> unsupported(feature: String): T =
         throw GatewayException("$feature requires Zed-Desktop Mobile Gateway API v2.")

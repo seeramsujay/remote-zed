@@ -382,8 +382,9 @@ class HttpZedRepository private constructor(
         request("POST", listOf("workspace", "trust"), body)
     }
 
-    override suspend fun gitStatus(): GitStatusResult {
-        val res = request("GET", listOf("git", "status"))
+    override suspend fun gitStatus(path: String?): GitStatusResult {
+        val q = if (path != null) mapOf("path" to path) else emptyMap()
+        val res = request("GET", listOf("git", "status"), query = q)
         val branch = res.get("branch")?.asString ?: "main"
         val clean = res.get("clean")?.asBoolean ?: true
         val ahead = res.get("ahead")?.asInt ?: 0
@@ -401,28 +402,31 @@ class HttpZedRepository private constructor(
         return GitStatusResult(branch, clean, ahead, behind, files)
     }
 
-    override suspend fun gitStage(paths: List<String>) {
+    override suspend fun gitStage(paths: List<String>, path: String?) {
         val body = JsonObject().apply {
             val arr = com.google.gson.JsonArray()
             paths.forEach { arr.add(it) }
             add("paths", arr)
+            path?.let { addProperty("path", it) }
         }
         request("POST", listOf("git", "stage"), body)
     }
 
-    override suspend fun gitUnstage(paths: List<String>) {
+    override suspend fun gitUnstage(paths: List<String>, path: String?) {
         val body = JsonObject().apply {
             val arr = com.google.gson.JsonArray()
             paths.forEach { arr.add(it) }
             add("paths", arr)
+            path?.let { addProperty("path", it) }
         }
         request("POST", listOf("git", "unstage"), body)
     }
 
-    override suspend fun gitCommit(message: String, stageAll: Boolean): GitCommitResult {
+    override suspend fun gitCommit(message: String, stageAll: Boolean, path: String?): GitCommitResult {
         val body = JsonObject().apply {
             addProperty("message", message)
             addProperty("stage_all", stageAll)
+            path?.let { addProperty("path", it) }
         }
         val res = request("POST", listOf("git", "commit"), body)
         return GitCommitResult(
@@ -432,37 +436,42 @@ class HttpZedRepository private constructor(
         )
     }
 
-    override suspend fun gitPush(remote: String?, branch: String?) {
+    override suspend fun gitPush(remote: String?, branch: String?, path: String?) {
         val body = JsonObject().apply {
             remote?.let { addProperty("remote", it) }
             branch?.let { addProperty("branch", it) }
+            path?.let { addProperty("path", it) }
         }
         request("POST", listOf("git", "push"), body)
     }
 
-    override suspend fun gitFetch(remote: String?, prune: Boolean): String {
+    override suspend fun gitFetch(remote: String?, prune: Boolean, path: String?): String {
         val body = JsonObject().apply {
             remote?.let { addProperty("remote", it) }
             addProperty("prune", prune)
+            path?.let { addProperty("path", it) }
         }
         val res = request("POST", listOf("git", "fetch"), body)
         return res.get("output")?.asString ?: "Fetch complete."
     }
 
-    override suspend fun gitBranches(): List<String> {
-        val res = request("GET", listOf("git", "branches"))
+    override suspend fun gitBranches(path: String?): List<String> {
+        val q = if (path != null) mapOf("path" to path) else emptyMap()
+        val res = request("GET", listOf("git", "branches"), query = q)
         return res.getAsJsonArray("branches")?.mapNotNull { it.asString } ?: emptyList()
     }
 
-    override suspend fun gitCheckout(branch: String) {
+    override suspend fun gitCheckout(branch: String, path: String?) {
         val body = JsonObject().apply {
             addProperty("branch", branch)
+            path?.let { addProperty("path", it) }
         }
         request("POST", listOf("git", "checkout"), body)
     }
 
-    override suspend fun gitLogGraph(): List<GitCommitInfo> {
-        val res = request("GET", listOf("git", "log"))
+    override suspend fun gitLogGraph(path: String?): List<GitCommitInfo> {
+        val q = if (path != null) mapOf("path" to path) else emptyMap()
+        val res = request("GET", listOf("git", "log"), query = q)
         return res.getAsJsonArray("commits")?.mapNotNull { elem ->
             val obj = elem.asJsonObject
             GitCommitInfo(
@@ -850,6 +859,10 @@ private fun JsonObject.project(): Project {
         kind = kind,
         connectionName = optionalString("connection_name"),
         opening = optionalBoolean("opening") ?: false,
+        isActiveWindow = optionalBoolean("is_active_window") ?: false,
+        activeThreadTitle = optionalString("active_thread_title"),
+        activeSessionId = optionalString("active_session_id"),
+        lastTimestamp = optionalString("timestamp"),
     )
 }
 

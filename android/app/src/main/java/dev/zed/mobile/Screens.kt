@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
@@ -335,77 +336,20 @@ internal fun quietSwitchColors() = SwitchDefaults.colors(
 
 @Composable
 internal fun HomeScreen(state: MobileState, vm: ZedViewModel) {
-    val activeProject = state.projects.firstOrNull { it.isOpen } ?: state.projects.firstOrNull()
-    val activeChat = state.recents.firstOrNull { activeProject != null && it.project.id == activeProject.id }
-        ?: state.recents.firstOrNull()
+    if (state.project != null) {
+        WorkspaceScreen(project = state.project, state = state, vm = vm)
+        return
+    }
+
+    val activeProject = state.projects.firstOrNull { it.isActiveWindow }
+        ?: state.projects.firstOrNull { it.isOpen }
+        ?: state.projects.firstOrNull()
 
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 4.dp, bottom = 120.dp)) {
         item(key = "desktop") { DesktopCard(state, onReconnect = vm::reconnect) }
         state.notice?.let { notice -> item(key = "notice") { InlineNotice(notice) } }
 
-        // Active Workspace Window & Live Active Chat Card
-        if (activeProject != null) {
-            item(key = "active-window-label") { HomeSectionLabel("Active Laptop Window") }
-            item(key = "active-window-card") {
-                CardGroup {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Icon(Symbols.Dns, contentDescription = null, tint = Color(0xFFA58DFE), modifier = Modifier.size(20.dp))
-                            Text(
-                                activeProject.name,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = Color(0xFFF3F3F7),
-                                modifier = Modifier.weight(1f),
-                            )
-                            StatusDot(Color(0xFF34D399), size = 8.dp)
-                            Text("Active Window", style = MaterialTheme.typography.labelSmall, color = Color(0xFF34D399))
-                        }
-                        Spacer(Modifier.height(4.dp))
-                        Text(shortPath(activeProject.path), style = MaterialTheme.typography.bodySmall, color = ZedColors.Muted)
-
-                        if (activeChat != null) {
-                            Spacer(Modifier.height(14.dp))
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = Color(0xFF1E1E28),
-                                border = BorderStroke(1.dp, Color(0xFF323242)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { vm.openThread(activeChat.thread, activeChat.project) },
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                ) {
-                                    Icon(Symbols.ChatBubble, contentDescription = null, tint = Color(0xFFA58DFE), modifier = Modifier.size(18.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("Active Desktop Chat", style = MaterialTheme.typography.labelSmall, color = Color(0xFFA58DFE))
-                                        Text(
-                                            activeChat.thread.title.ifBlank { "Live Conversation" },
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = Color.White,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                    SmallButton(
-                                        text = "Continue →",
-                                        onClick = { vm.openThread(activeChat.thread, activeChat.project) },
-                                        tone = ButtonTone.Primary,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Hero Agent Quick Launch Options (Replacing recents on the Home Screen)
+        // Hero Agent Quick Launch Options
         item(key = "options-label") { HomeSectionLabel("Quick Options") }
         item(key = "options-grid") {
             Row(
@@ -482,7 +426,357 @@ internal fun HomeScreen(state: MobileState, vm: ZedViewModel) {
             }
         }
 
-        // Quick Workspace Tools
+        // Dedicated Full Space for All Multiple Open Workspaces
+        item(key = "workspaces-label") {
+            val count = state.projects.size
+            HomeSectionLabel("Active Laptop Workspaces ($count)")
+        }
+
+        if (state.projects.isEmpty()) {
+            item(key = "empty-workspaces") {
+                MascotMessage(
+                    title = "No active workspaces found",
+                    detail = "Open a workspace window in Zed on your laptop and it will appear here instantly.",
+                )
+            }
+        } else {
+            items(state.projects, key = { it.id }) { project ->
+                val recentChat = state.recents.firstOrNull { it.project.id == project.id }
+                val chatTitle = project.activeThreadTitle
+                    ?: recentChat?.thread?.title
+                    ?: "Live Conversation"
+
+                Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { vm.openWorkspace(project) },
+                        color = Color(0xFF16161E),
+                        border = BorderStroke(
+                            1.dp,
+                            if (project.isActiveWindow) Color(0xFF34D399).copy(alpha = 0.6f) else Color(0xFF262634),
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            // Workspace Header Row
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Icon(
+                                    imageVector = if (project.isActiveWindow) Symbols.Dns else Symbols.Folder,
+                                    contentDescription = null,
+                                    tint = if (project.isActiveWindow) Color(0xFF34D399) else Color(0xFFA58DFE),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                                Text(
+                                    project.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Color(0xFFF3F3F7),
+                                    modifier = Modifier.weight(1f),
+                                )
+                                if (project.isActiveWindow) {
+                                    StatusDot(Color(0xFF34D399), size = 8.dp)
+                                    Text("Active Window", style = MaterialTheme.typography.labelSmall, color = Color(0xFF34D399))
+                                } else if (project.isOpen) {
+                                    StatusDot(Color(0xFF38BDF8), size = 8.dp)
+                                    Text("Open", style = MaterialTheme.typography.labelSmall, color = Color(0xFF38BDF8))
+                                } else {
+                                    Text("Recent", style = MaterialTheme.typography.labelSmall, color = ZedColors.Muted)
+                                }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text(shortPath(project.path), style = MaterialTheme.typography.bodySmall, color = ZedColors.Muted)
+
+                            // Active Chat Preview Card (if present)
+                            if (chatTitle.isNotBlank()) {
+                                Spacer(Modifier.height(12.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color(0xFF1E1E28),
+                                    border = BorderStroke(1.dp, Color(0xFF323242)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            if (recentChat != null) {
+                                                vm.openThread(recentChat.thread, project)
+                                            } else {
+                                                vm.openWorkspace(project)
+                                            }
+                                        },
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    ) {
+                                        Icon(Symbols.ChatBubble, contentDescription = null, tint = Color(0xFFA58DFE), modifier = Modifier.size(16.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Latest Thread", style = MaterialTheme.typography.labelSmall, color = Color(0xFFA58DFE))
+                                            Text(
+                                                chatTitle,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                        SmallButton(
+                                            text = "Chat →",
+                                            onClick = {
+                                                if (recentChat != null) {
+                                                    vm.openThread(recentChat.thread, project)
+                                                } else {
+                                                    vm.openWorkspace(project)
+                                                }
+                                            },
+                                            tone = ButtonTone.Primary,
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Workspace Quick Actions Row
+                            Spacer(Modifier.height(14.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                SmallButton(
+                                    text = "Open Workspace →",
+                                    onClick = { vm.openWorkspace(project) },
+                                    tone = ButtonTone.Primary,
+                                    modifier = Modifier.weight(1.2f),
+                                )
+                                SmallButton(
+                                    text = "Git",
+                                    onClick = { vm.showGit(project) },
+                                    tone = ButtonTone.Secondary,
+                                    modifier = Modifier.weight(0.8f),
+                                )
+                                SmallButton(
+                                    text = "+ Chat",
+                                    onClick = { vm.createThread(project.id, "antigravity") },
+                                    tone = ButtonTone.Secondary,
+                                    modifier = Modifier.weight(0.8f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Dedicated Full Workspace Screen showing workspace chats and Git repository */
+@Composable
+internal fun WorkspaceScreen(project: Project, state: MobileState, vm: ZedViewModel) {
+    val projectThreads = state.projectThreads[project.id].orEmpty()
+    val projectRecents = state.recents.filter { it.project.id == project.id }
+
+    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 4.dp, bottom = 120.dp)) {
+        // Top Navigation Bar
+        item(key = "workspace-nav") {
+            Surface(
+                color = Color(0xFF16161E),
+                border = BorderStroke(1.dp, Color(0xFF262634)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF262634),
+                            modifier = Modifier.clickable { vm.exitWorkspace() },
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Text("← All Workspaces", style = MaterialTheme.typography.labelMedium, color = Color(0xFFA58DFE))
+                            }
+                        }
+                        Spacer(Modifier.weight(1f))
+                        if (project.isActiveWindow) {
+                            StatusDot(Color(0xFF34D399), size = 8.dp)
+                            Text("Active Window", style = MaterialTheme.typography.labelSmall, color = Color(0xFF34D399))
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text(project.name, style = MaterialTheme.typography.headlineSmall, color = Color.White)
+                    Spacer(Modifier.height(2.dp))
+                    Text(shortPath(project.path), style = MaterialTheme.typography.bodySmall, color = ZedColors.Muted)
+                }
+            }
+        }
+
+        // Section: Chats & Agents
+        item(key = "threads-label") { HomeSectionLabel("Chats & AI Agents") }
+        item(key = "threads-actions") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                SmallButton(
+                    text = "+ AntiGravity Chat",
+                    onClick = { vm.createThread(project.id, "antigravity") },
+                    tone = ButtonTone.Primary,
+                    modifier = Modifier.weight(1f),
+                )
+                SmallButton(
+                    text = "+ Pi Agent Chat",
+                    onClick = { vm.createThread(project.id, "pi") },
+                    tone = ButtonTone.Secondary,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+
+        if (projectThreads.isEmpty() && projectRecents.isEmpty()) {
+            item(key = "no-threads") {
+                Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
+                    Surface(
+                        color = Color(0xFF16161E),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Color(0xFF262634)),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("No chat threads yet for ${project.name}", style = MaterialTheme.typography.bodyMedium, color = ZedColors.Muted)
+                            Spacer(Modifier.height(8.dp))
+                            SmallButton(
+                                text = "Start First Chat →",
+                                onClick = { vm.createThread(project.id, "antigravity") },
+                                tone = ButtonTone.Primary,
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            val allThreads = if (projectThreads.isNotEmpty()) projectThreads else projectRecents.map { it.thread }
+            items(allThreads, key = { it.id }) { thread ->
+                Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+                    Surface(
+                        color = Color(0xFF16161E),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Color(0xFF262634)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { vm.openThread(thread, project) },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Icon(Symbols.ChatBubble, contentDescription = null, tint = Color(0xFFA58DFE), modifier = Modifier.size(18.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    thread.title.ifBlank { "Conversation" },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    thread.agent?.name ?: "AntiGravity Agent",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFFA58DFE),
+                                )
+                            }
+                            SmallButton(
+                                text = "Open →",
+                                onClick = { vm.openThread(thread, project) },
+                                tone = ButtonTone.Primary,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section: Git Repository for this workspace
+        item(key = "git-label") { HomeSectionLabel("Workspace Git Repository") }
+        item(key = "git-card") {
+            Box(modifier = Modifier.padding(horizontal = 20.dp)) {
+                Surface(
+                    color = Color(0xFF16161E),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, Color(0xFF262634)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(Icons.Default.AccountTree, contentDescription = null, tint = Color(0xFFA58DFE), modifier = Modifier.size(20.dp))
+                            Text(
+                                "Git: ${project.name}",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.White,
+                                modifier = Modifier.weight(1f),
+                            )
+                            val status = state.gitStatus
+                            val branch = status?.branch ?: "HEAD"
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF262634),
+                            ) {
+                                Text(
+                                    branch,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFFA58DFE),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        val status = state.gitStatus
+                        val modifiedCount = status?.files?.size ?: 0
+                        Text(
+                            if (modifiedCount == 0) "Working directory clean" else "$modifiedCount changed file(s)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (modifiedCount == 0) Color(0xFF34D399) else Color(0xFFFBBF24),
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            SmallButton(
+                                text = "Open Git Panel →",
+                                onClick = { vm.showGit(project) },
+                                tone = ButtonTone.Primary,
+                                modifier = Modifier.weight(1f),
+                            )
+                            SmallButton(
+                                text = "Fetch",
+                                onClick = { vm.gitFetch(project.path) },
+                                tone = ButtonTone.Secondary,
+                                modifier = Modifier.weight(0.6f),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section: Tools for this workspace
         item(key = "tools-label") { HomeSectionLabel("Workspace Tools") }
         item(key = "tools-row") {
             Row(
@@ -491,7 +785,6 @@ internal fun HomeScreen(state: MobileState, vm: ZedViewModel) {
                     .padding(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                // Terminal Button
                 Surface(
                     modifier = Modifier
                         .weight(1f)
@@ -507,7 +800,6 @@ internal fun HomeScreen(state: MobileState, vm: ZedViewModel) {
                         Text("Terminal", style = MaterialTheme.typography.labelMedium, color = Color(0xFFF3F3F7))
                     }
                 }
-                // Files Button
                 Surface(
                     modifier = Modifier
                         .weight(1f)
@@ -521,42 +813,6 @@ internal fun HomeScreen(state: MobileState, vm: ZedViewModel) {
                         Icon(Symbols.Folder, contentDescription = null, tint = Color(0xFFF3F3F7), modifier = Modifier.size(20.dp))
                         Spacer(Modifier.height(6.dp))
                         Text("Files & Trust", style = MaterialTheme.typography.labelMedium, color = Color(0xFFF3F3F7))
-                    }
-                }
-                // Git Button
-                Surface(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { vm.showGit() },
-                    color = Color(0xFF16161B),
-                    border = BorderStroke(1.dp, Color(0xFF262632)),
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.AccountTree, contentDescription = null, tint = Color(0xFFF3F3F7), modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.height(6.dp))
-                        Text("Git Status", style = MaterialTheme.typography.labelMedium, color = Color(0xFFF3F3F7))
-                    }
-                }
-            }
-        }
-
-        // Open Projects & Workspaces
-        item(key = "projects-label") { HomeSectionLabel("Open Windows & Projects") }
-        if (state.projects.isEmpty()) {
-            item(key = "empty") {
-                MascotMessage(
-                    title = "No projects yet",
-                    detail = "Open a project in Zed on your desktop and it will show up here.",
-                )
-            }
-        } else {
-            item(key = "projects") {
-                CardGroup {
-                    state.projects.forEachIndexed { index, project ->
-                        ProjectEntry(state, project, vm)
-                        if (index < state.projects.lastIndex) Hairline()
                     }
                 }
             }
