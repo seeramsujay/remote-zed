@@ -37,7 +37,11 @@ else
     mkdir -p "${HOME}/.local/bin"
     curl -fsSL https://github.com/seeramsujay/remote-zed/releases/download/v0.1.1/zed-remote-daemon-linux-x86_64.tar.gz | tar -xz -C "${HOME}/.local/bin" || true
     chmod +x "${USER_BIN}" 2>/dev/null || true
-    TARGET_BIN="${USER_BIN}"
+    if [[ -f "${USER_BIN}" ]]; then
+        TARGET_BIN="${USER_BIN}"
+    elif [[ -f "${GLOBAL_BIN}" ]]; then
+        TARGET_BIN="${GLOBAL_BIN}"
+    fi
 fi
 
 # Load or generate persistent bearer token
@@ -50,7 +54,7 @@ fi
 echo "[*] Configuring official Zed settings at ${ZED_SETTINGS}..."
 
 python3 -c "
-import json, os
+import json, os, shutil
 
 settings_path = '${ZED_SETTINGS}'
 if os.path.exists(settings_path):
@@ -63,21 +67,46 @@ else:
     data = {}
 
 agent_servers = data.get('agent_servers', {})
-target_agent = "agy"
-if shutil.which("agy"):
-    target_agent = shutil.which("agy")
-elif shutil.which("antigravity"):
-    target_agent = shutil.which("antigravity")
+target_agent = 'agy'
+if shutil.which('agy'):
+    target_agent = shutil.which('agy')
+elif shutil.which('antigravity'):
+    target_agent = shutil.which('antigravity')
 
 agent_servers['AntiGravity-Remote'] = {
+    'default_config_options': {
+        'mode': 'yolo'
+    },
     'type': 'custom',
     'command': '${TARGET_BIN}',
     'args': [
         '--target-command', target_agent,
-        '--target-args', 'acp',
+        '--target-args', 'acp --dangerously-skip-permissions',
         '--port', '8443',
         '--auth-token', '${TOKEN}'
     ]
+}
+if 'AntiGravity' in agent_servers:
+    agent_servers['AntiGravity']['args'] = ['acp', '--dangerously-skip-permissions']
+
+target_pi = shutil.which('pi-acp') or shutil.which('pi') or 'pi-acp'
+agent_servers['Pi-Remote'] = {
+    'default_config_options': {
+        'mode': 'yolo'
+    },
+    'type': 'custom',
+    'command': '${TARGET_BIN}',
+    'args': [
+        '--target-command', target_pi,
+        '--target-args', '',
+        '--port', '8443',
+        '--auth-token', '${TOKEN}'
+    ]
+}
+agent_servers['Pi'] = {
+    'type': 'custom',
+    'command': target_pi,
+    'args': []
 }
 data['agent_servers'] = agent_servers
 

@@ -28,7 +28,9 @@ NC="\033[0m"
 
 CONFIG_DIR="${HOME}/.config/zed-remote"
 CONFIG_FILE="${CONFIG_DIR}/bunker-session.json"
-LOG_FILE="/tmp/zed-pinggy.log"
+PID_FILE="${CONFIG_DIR}/zed-tunnel.pid"
+LOCK_FILE="${CONFIG_DIR}/zed-tunnel.lock"
+LOG_FILE="${CONFIG_DIR}/zed-pinggy.log"
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 SERVICE_FILE="${SYSTEMD_USER_DIR}/zed-tunnel.service"
 
@@ -123,7 +125,25 @@ EOF
 show_status() {
     echo -e "${BOLD}Zed Remote Status:${NC}"
     echo -e "--------------------------------------------------"
-    if pgrep -f "free.pinggy.io" >/dev/null 2>&1; then
+    local is_running=false
+    if [[ -f "${PID_FILE}" ]]; then
+        local spid
+        spid=$(cat "${PID_FILE}" 2>/dev/null || true)
+        if [[ -n "${spid}" ]] && kill -0 "${spid}" 2>/dev/null; then
+            local cmdline=""
+            if [[ -r "/proc/${spid}/cmdline" ]]; then
+                cmdline=$(tr '\0' ' ' < "/proc/${spid}/cmdline" 2>/dev/null || true)
+            fi
+            if [[ "$cmdline" == *"zed-tunnel"* ]] || [[ "$cmdline" == *"bunker-tunnel"* ]] || [[ "$cmdline" == *"zedt"* ]]; then
+                is_running=true
+            fi
+        fi
+    fi
+    if ! $is_running && pgrep -f "tcp@.*pinggy\.io" >/dev/null 2>&1; then
+        is_running=true
+    fi
+
+    if $is_running; then
         echo -e "Tunnel Process:  ${GREEN}RUNNING${NC}"
         if [[ -f "${LOG_FILE}" ]]; then
             CURRENT_URL=$(grep -oE "(tcp|http|https)://[a-zA-Z0-9.-]+:[0-9]+" "${LOG_FILE}" | tail -n 1 || true)
@@ -155,7 +175,25 @@ show_status() {
 
 stop_tunnel() {
     echo -e "${YELLOW}[*] Stopping running tunnel instances...${NC}"
-    pkill -f "free.pinggy.io" || true
+    if [[ -f "${PID_FILE}" ]]; then
+        local spid
+        spid=$(cat "${PID_FILE}" 2>/dev/null || true)
+        if [[ -n "${spid}" ]] && kill -0 "${spid}" 2>/dev/null; then
+            local cmdline=""
+            if [[ -r "/proc/${spid}/cmdline" ]]; then
+                cmdline=$(tr '\0' ' ' < "/proc/${spid}/cmdline" 2>/dev/null || true)
+            fi
+            if [[ "$cmdline" == *"zed-tunnel"* ]] || [[ "$cmdline" == *"bunker-tunnel"* ]] || [[ "$cmdline" == *"zedt"* ]]; then
+                kill "${spid}" 2>/dev/null || true
+                sleep 0.5
+                kill -9 "${spid}" 2>/dev/null || true
+            else
+                echo -e "${YELLOW}[!] Stale PID ${spid} does not match zed-tunnel supervisor, cleaning PID file.${NC}"
+            fi
+        fi
+        rm -f "${PID_FILE}"
+    fi
+    pkill -f "tcp@.*pinggy\.io" || true
     if systemctl --user is-active zed-tunnel.service >/dev/null 2>&1; then
         systemctl --user stop zed-tunnel.service
         echo -e "${GREEN}[✓] Stopped systemd service.${NC}"
@@ -209,7 +247,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --service)
             manage_service "${2:-status}"
-            shift 2 || shift
             ;;
         -i|--inject)
             INJECT_SCRIPT=""
@@ -256,6 +293,32 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+HAS_LOCK=false
+cleanup() {
+    echo ""
+    echo -e "${YELLOW}[*] Shutting down pinggy tunnel...${NC}"
+    if [[ -n "${SSH_PID:-}" ]] && kill -0 "${SSH_PID}" 2>/dev/null; then
+        kill "${SSH_PID}" 2>/dev/null || true
+        wait "${SSH_PID}" 2>/dev/null || true
+    fi
+    if [[ "$HAS_LOCK" = true ]]; then
+        rm -f "${PID_FILE}"
+    fi
+    exit 0
+}
+trap cleanup SIGINT SIGTERM EXIT
+
+# Acquire exclusive lock BEFORE credential mutation (--reset) or supervisor startup
+exec 200>"${LOCK_FILE}"
+if ! flock -n 200; then
+    echo -e "${RED}[!] Another zed-tunnel supervisor is already running.${NC}"
+    echo -e "${YELLOW}[*] Check status with: zed-tunnel -s"
+    echo -e "    To stop or reset:  zed-tunnel --stop${NC}"
+    exit 1
+fi
+HAS_LOCK=true
+echo $$ > "${PID_FILE}"
 
 if [[ "$DAEMON_MODE" = false ]]; then
     echo -e "${CYAN}${BOLD}"
@@ -337,14 +400,6 @@ qr.print_ascii(invert=True)
     echo ""
 fi
 
-cleanup() {
-    echo ""
-    echo -e "${YELLOW}[*] Shutting down pinggy tunnel...${NC}"
-    pkill -f "free.pinggy.io" || true
-    exit 0
-}
-trap cleanup SIGINT SIGTERM
-
 encrypt_and_publish() {
     local target_url="$1"
     python3 -c "
@@ -379,10 +434,15 @@ except Exception as e:
 # Main tunnel loop (Pinggy sessions refresh automatically every 55 minutes on free tier)
 while true; do
     echo -e "${BLUE}[*] Initializing fresh reverse tunnel via SSH (port 443)...${NC}"
-    pkill -f "free.pinggy.io" || true
-    > "${LOG_FILE}"
+    if [[ -n "${SSH_PID:-}" ]] && kill -0 "${SSH_PID}" 2>/dev/null; then
+        kill "${SSH_PID}" 2>/dev/null || true
+        wait "${SSH_PID}" 2>/dev/null || true
+    fi
+    : > "${LOG_FILE}"
 
-    stdbuf -oL ssh -p 443 -R0:localhost:"${LOCAL_PORT}" tcp@free.pinggy.io \
+    # Try a.pinggy.io first (more reliable thread capacity), fallback to free.pinggy.io
+    PINGGY_HOST="a.pinggy.io"
+    stdbuf -oL ssh -p 443 -R0:localhost:"${LOCAL_PORT}" -T tcp@"${PINGGY_HOST}" \
         -o StrictHostKeyChecking=no \
         -o ServerAliveInterval=30 \
         -o ServerAliveCountMax=3 > "${LOG_FILE}" 2>&1 &
@@ -402,6 +462,28 @@ while true; do
         head -n 10 "${LOG_FILE}"
     fi
 
-    echo -e "${BLUE}[*] Tunnel active. Automatic refresh in 55 minutes...${NC}"
-    sleep 3300
+    COUNT=0
+    while kill -0 "${SSH_PID}" 2>/dev/null; do
+        if [[ -z "${TUNNEL_URL}" ]]; then
+            TUNNEL_URL=$(grep -oE "(tcp|http|https)://[a-zA-Z0-9.-]+:[0-9]+" "${LOG_FILE}" | head -n 1 || true)
+            if [[ -n "${TUNNEL_URL}" ]]; then
+                echo -e "${GREEN}${BOLD}[+] Tunnel is LIVE: ${TUNNEL_URL}${NC}"
+                encrypt_and_publish "${TUNNEL_URL}"
+            fi
+        fi
+        sleep 5
+        COUNT=$((COUNT + 5))
+        # Re-publish keepalive to ntfy every 30 seconds so dynamic rendezvous never expires
+        if [[ $((COUNT % 30)) -eq 0 ]] && [[ -n "${TUNNEL_URL}" ]]; then
+            encrypt_and_publish "${TUNNEL_URL}" >/dev/null 2>&1 || true
+        fi
+        # Enforce refresh at 55 minutes for Pinggy free tier rotation
+        if [[ ${COUNT} -ge 3300 ]]; then
+            echo -e "${BLUE}[*] 55-minute rotation window reached, rotating tunnel...${NC}"
+            break
+        fi
+    done
+
+    echo -e "${YELLOW}[!] Tunnel connection dropped or rotating. Restarting immediately...${NC}"
+    kill "${SSH_PID}" 2>/dev/null || true
 done

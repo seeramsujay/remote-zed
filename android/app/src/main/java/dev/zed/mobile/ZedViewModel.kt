@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-enum class Page { PAIR, PROJECTS, CHAT, CHANGES, SETTINGS, TERMINAL, FILES }
+enum class Page { PAIR, PROJECTS, CHAT, CHANGES, SETTINGS, TERMINAL, FILES, GIT }
 
 /** A thread with the project it belongs to, for lists that span projects. */
 data class RecentThread(val thread: ThreadSummary, val project: Project)
@@ -164,6 +164,10 @@ data class MobileState(
     val pollError: String? = null,
     val notice: String? = null,
     val lastUpdated: Long? = null,
+    val gitStatus: GitStatusResult? = null,
+    val gitBranches: List<String> = emptyList(),
+    val gitCommits: List<GitCommitInfo> = emptyList(),
+    val gitLoading: Boolean = false,
 ) {
     val threads: List<ThreadSummary> get() = project?.let { projectThreads[it.id] }.orEmpty()
     val agents: List<AgentInfo> get() = project?.let { projectAgents[it.id] }.orEmpty()
@@ -278,6 +282,8 @@ class ZedViewModel(
                 origin = resolvedOrigin,
                 deviceId = "bunker-phone",
                 credential = bunker.token,
+                bunkerTopic = bunker.ntfyTopic,
+                bunkerKey = bunker.encryptionKeyBase64,
             )
             val candidate = connectV2(credential)
             candidate.checkStatus()
@@ -348,6 +354,24 @@ class ZedViewModel(
             handleRevokedCredential()
             return@task
         } catch (_: Exception) {
+            if (credential.bunkerTopic != null && credential.bunkerKey != null) {
+                try {
+                    val freshOrigin = BunkerTunnel.resolveTunnelUrl(
+                        BunkerConfig(credential.bunkerTopic, credential.bunkerKey, credential.credential)
+                    )
+                    if (freshOrigin.isNotBlank() && freshOrigin != credential.origin) {
+                        val refreshed = credential.copy(origin = freshOrigin)
+                        val retryCandidate = connectV2(refreshed)
+                        retryCandidate.checkStatus()
+                        credentialStore.save(refreshed)
+                        activeV2Credential = refreshed
+                        repository = retryCandidate
+                        mutable.value = mutable.value.copy(host = refreshed.origin.trim(), gatewayUnavailable = false)
+                        syncV2Projects(refreshed, retryCandidate)
+                        return@task
+                    }
+                } catch (_: Exception) {}
+            }
             // Retain the validated repository instance so an explicit refresh can retry later.
             repository = candidate
             mutable.value = mutable.value.copy(gatewayUnavailable = true)
@@ -497,6 +521,31 @@ class ZedViewModel(
                 else mutable.value = mutable.value.copy(error = message(error))
             } catch (error: Exception) {
                 if (repository !== repo) return@launch
+                val cred = activeV2Credential
+                if (cred?.bunkerTopic != null && cred.bunkerKey != null) {
+                    try {
+                        val freshOrigin = BunkerTunnel.resolveTunnelUrl(
+                            BunkerConfig(cred.bunkerTopic, cred.bunkerKey, cred.credential)
+                        )
+                        if (freshOrigin.isNotBlank() && freshOrigin != cred.origin) {
+                            val refreshed = cred.copy(origin = freshOrigin)
+                            val retryCandidate = connectV2(refreshed)
+                            val freshProjects = retryCandidate.projects()
+                            saveProjectCatalog(refreshed, freshProjects)
+                            credentialStore.save(refreshed)
+                            activeV2Credential = refreshed
+                            repository = retryCandidate
+                            mutable.value = mutable.value.copy(
+                                host = refreshed.origin.trim(),
+                                projects = freshProjects,
+                                gatewayUnavailable = false,
+                                refreshing = false,
+                            )
+                            startThreadLoad(retryCandidate, freshProjects)
+                            return@launch
+                        }
+                    } catch (_: Exception) {}
+                }
                 // Keep the last authenticated catalog on screen, but never treat it as live.
                 mutable.value = if (activeV2Credential != null) {
                     mutable.value.copy(gatewayUnavailable = true)
@@ -504,7 +553,7 @@ class ZedViewModel(
                     mutable.value.copy(error = message(error))
                 }
             } finally {
-                if (repository === repo) mutable.value = mutable.value.copy(refreshing = false)
+                if (repository === repo || activeV2Credential != null) mutable.value = mutable.value.copy(refreshing = false)
             }
         }
     }
@@ -843,6 +892,14 @@ class ZedViewModel(
         if (!mutable.value.busy) navigate(Page.FILES)
     }
 
+    fun showGit() {
+        if (!mutable.value.busy) {
+            navigate(Page.GIT)
+            loadGitStatus()
+            loadGitLog()
+        }
+    }
+
     suspend fun executeTerminal(command: String): TerminalExecResponse {
         val repo = repository ?: return TerminalExecResponse(stdout = "", stderr = "Not connected to Zed host.", exitCode = -1)
         return try {
@@ -886,10 +943,204 @@ class ZedViewModel(
         }
     }
 
+    fun trustWorkspace(path: String) {
+        val repo = repository ?: return
+        viewModelScope.launch {
+            try {
+                repo.fsTrust(path)
+                mutable.value = mutable.value.copy(toast = "Explicitly trusted: $path")
+            } catch (e: Exception) {
+                mutable.value = mutable.value.copy(toast = "Failed to trust: ${e.message}")
+            }
+        }
+    }
+
+    fun reconnect() {
+        homeJob?.cancel()
+        action?.cancel()
+        mutable.value = mutable.value.copy(busy = true, toast = "Reconnecting to Zed host...")
+        viewModelScope.launch {
+            val cred = activeV2Credential
+            if (cred != null && cred.bunkerTopic != null && cred.bunkerKey != null) {
+                try {
+                    val freshOrigin = BunkerTunnel.resolveTunnelUrl(
+                        BunkerConfig(cred.bunkerTopic, cred.bunkerKey, cred.credential)
+                    )
+                    if (freshOrigin.isNotBlank()) {
+                        val refreshed = cred.copy(origin = freshOrigin)
+                        val candidate = connectV2(refreshed)
+                        candidate.checkStatus()
+                        val projects = candidate.projects()
+                        saveProjectCatalog(refreshed, projects)
+                        credentialStore.save(refreshed)
+                        activeV2Credential = refreshed
+                        repository = candidate
+                        mutable.value = mutable.value.copy(
+                            host = refreshed.origin.trim(),
+                            projects = projects,
+                            gatewayUnavailable = false,
+                            busy = false,
+                            toast = "Connected to Zed host!",
+                        )
+                        startThreadLoad(candidate, projects)
+                        return@launch
+                    }
+                } catch (e: GatewayAuthenticationException) {
+                    mutable.value = mutable.value.copy(busy = false)
+                    handleRevokedCredential()
+                    return@launch
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    // Fallthrough to direct retry
+                }
+            }
+
+            val repo = repository
+            if (repo != null) {
+                try {
+                    repo.checkStatus()
+                    val projects = repo.projects()
+                    mutable.value = mutable.value.copy(
+                        projects = projects,
+                        gatewayUnavailable = false,
+                        busy = false,
+                        toast = "Connected to Zed host!",
+                    )
+                    startThreadLoad(repo, projects)
+                } catch (e: GatewayAuthenticationException) {
+                    mutable.value = mutable.value.copy(busy = false)
+                    handleRevokedCredential()
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    mutable.value = mutable.value.copy(
+                        busy = false,
+                        gatewayUnavailable = true,
+                        toast = "Could not reach Zed host: ${e.message}",
+                    )
+                }
+            } else {
+                mutable.value = mutable.value.copy(busy = false, gatewayUnavailable = true)
+            }
+        }
+    }
+
+    fun loadGitStatus() {
+        val repo = repository ?: return
+        viewModelScope.launch {
+            mutable.value = mutable.value.copy(gitLoading = true)
+            try {
+                val st = repo.gitStatus()
+                val br = repo.gitBranches()
+                mutable.value = mutable.value.copy(gitStatus = st, gitBranches = br, gitLoading = false)
+            } catch (e: Exception) {
+                mutable.value = mutable.value.copy(gitLoading = false, toast = "Git status error: ${e.message}")
+            }
+        }
+    }
+
+    fun loadGitLog() {
+        val repo = repository ?: return
+        viewModelScope.launch {
+            mutable.value = mutable.value.copy(gitLoading = true)
+            try {
+                val log = repo.gitLogGraph()
+                mutable.value = mutable.value.copy(gitCommits = log, gitLoading = false)
+            } catch (e: Exception) {
+                mutable.value = mutable.value.copy(gitLoading = false, toast = "Git log error: ${e.message}")
+            }
+        }
+    }
+
+    fun loadGitBranches() {
+        val repo = repository ?: return
+        viewModelScope.launch {
+            try {
+                val branches = repo.gitBranches()
+                mutable.value = mutable.value.copy(gitBranches = branches)
+            } catch (e: Exception) {
+                mutable.value = mutable.value.copy(toast = "Git branches error: ${e.message}")
+            }
+        }
+    }
+
+    fun stageGit(paths: List<String>) {
+        val repo = repository ?: return
+        viewModelScope.launch {
+            try {
+                repo.gitStage(paths)
+                loadGitStatus()
+            } catch (e: Exception) {
+                mutable.value = mutable.value.copy(toast = "Stage error: ${e.message}")
+            }
+        }
+    }
+
+    fun unstageGit(paths: List<String>) {
+        val repo = repository ?: return
+        viewModelScope.launch {
+            try {
+                repo.gitUnstage(paths)
+                loadGitStatus()
+            } catch (e: Exception) {
+                mutable.value = mutable.value.copy(toast = "Unstage error: ${e.message}")
+            }
+        }
+    }
+
+    fun commitGit(message: String, stageAll: Boolean = false, onSuccess: (() -> Unit)? = null) {
+        val repo = repository ?: return
+        if (message.isBlank()) {
+            mutable.value = mutable.value.copy(toast = "Commit message cannot be empty")
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val res = repo.gitCommit(message, stageAll)
+                loadGitStatus()
+                loadGitLog()
+                mutable.value = mutable.value.copy(toast = "Committed: ${res.commitHash}")
+                onSuccess?.invoke()
+            } catch (e: Exception) {
+                mutable.value = mutable.value.copy(toast = "Commit failed: ${e.message}")
+            }
+        }
+    }
+
+    fun checkoutBranch(branch: String) {
+        val repo = repository ?: return
+        viewModelScope.launch {
+            try {
+                mutable.value = mutable.value.copy(toast = "Switching to branch $branch...")
+                repo.gitCheckout(branch)
+                loadGitStatus()
+                loadGitLog()
+                loadGitBranches()
+                mutable.value = mutable.value.copy(toast = "Switched to branch $branch")
+            } catch (e: Exception) {
+                mutable.value = mutable.value.copy(toast = "Failed to switch branch: ${e.message}")
+            }
+        }
+    }
+
+    fun pushGit() {
+        val repo = repository ?: return
+        viewModelScope.launch {
+            try {
+                mutable.value = mutable.value.copy(toast = "Pushing to remote...")
+                repo.gitPush()
+                loadGitStatus()
+                mutable.value = mutable.value.copy(toast = "Pushed changes successfully!")
+            } catch (e: Exception) {
+                mutable.value = mutable.value.copy(toast = "Push error: ${e.message}")
+            }
+        }
+    }
+
     fun back() {
         if (mutable.value.busy) return
         when (mutable.value.page) {
             Page.CHANGES -> navigate(Page.CHAT)
+            Page.GIT -> navigate(if (mutable.value.selectedThread != null) Page.CHAT else Page.PROJECTS)
             Page.CHAT -> {
                 beginChatSession()
                 navigate(Page.PROJECTS); mutable.value =
@@ -915,6 +1166,10 @@ class ZedViewModel(
 
     fun refresh() {
         val current = mutable.value
+        if (current.gatewayUnavailable || repository == null) {
+            reconnect()
+            return
+        }
         val repo = repository ?: return
         if (current.page == Page.PROJECTS) {
             refreshHome()

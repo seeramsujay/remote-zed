@@ -2,4 +2,4 @@
 
 pub mod engine;
 
-pub use engine::{GitCommitResult, GitDiffResult, GitEngine, GitFileStatus, GitStatusResult};
+pub use engine::{GitCommitInfo, GitCommitResult, GitDiffResult, GitEngine, GitFileStatus, GitStatusResult};

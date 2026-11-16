@@ -1,7 +1,9 @@
 package dev.zed.mobile
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -47,8 +50,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -91,6 +97,13 @@ fun TerminalScreen(
 
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+        keyboard?.show()
+    }
 
     fun runCmd(cmdText: String) {
         val trimmed = cmdText.trim()
@@ -189,6 +202,13 @@ fun TerminalScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) {
+                        focusRequester.requestFocus()
+                        keyboard?.show()
+                    }
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             ) {
                 LazyColumn(
@@ -303,28 +323,44 @@ fun TerminalScreen(
                     BasicTextField(
                         value = inputCommand,
                         onValueChange = { inputCommand = it },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(focusRequester),
                         textStyle = TextStyle(
                             fontFamily = MonoFamily,
                             fontSize = 13.5.sp,
                             color = MaterialTheme.colorScheme.onSurface,
                         ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        cursorBrush = SolidColor(Color(0xFF34D399)),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                         keyboardActions = KeyboardActions(onGo = { runCmd(inputCommand) }),
                         decorationBox = { innerTextField ->
-                            if (inputCommand.isEmpty()) {
-                                Text(
-                                    text = "type command (mkdir, cargo, ls)...",
-                                    style = TextStyle(
-                                        fontFamily = MonoFamily,
-                                        fontSize = 12.5.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                    ),
-                                )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 40.dp)
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                    ) {
+                                        focusRequester.requestFocus()
+                                        keyboard?.show()
+                                    },
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                if (inputCommand.isEmpty()) {
+                                    Text(
+                                        text = "type command (mkdir, cargo, git)...",
+                                        style = TextStyle(
+                                            fontFamily = MonoFamily,
+                                            fontSize = 12.5.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                        ),
+                                    )
+                                }
+                                innerTextField()
                             }
-                            innerTextField()
                         },
                     )
                     IconButton(

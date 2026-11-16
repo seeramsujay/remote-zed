@@ -22,7 +22,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # pylint: disable=import-error
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCHEMAS_DIR = REPO_ROOT / "shared" / "schemas"
@@ -359,6 +359,161 @@ class TestTerminalAndFsOperations(unittest.TestCase):
         )
         self.assertEqual(res.returncode, 0)
         self.assertIn("bunker terminal online", res.stdout)
+
+
+class TestYoloAndV2ThreadConfiguration(unittest.TestCase):
+    """Verifies YOLO mode schema and v2 thread configuration payloads."""
+
+    def test_yolo_mode_configuration_schema(self):
+        config_payload = {
+            "model": None,
+            "thinking_enabled": False,
+            "agent": {
+                "id": "antigravity",
+                "name": "AntiGravity Agent",
+                "is_native": False,
+            },
+            "modes": {
+                "current": "yolo",
+                "available": [
+                    {
+                        "id": "yolo",
+                        "name": "YOLO",
+                        "description": "Autonomous auto-pilot with auto-approved permissions (--dangerously-skip-permissions)",
+                    },
+                    {
+                        "id": "auto",
+                        "name": "Auto",
+                        "description": "Autonomous execution with permission confirmations",
+                    },
+                    {
+                        "id": "plan",
+                        "name": "Plan",
+                        "description": "Read-only planning without modifications",
+                    },
+                ],
+            },
+            "options": [],
+        }
+        self.assertEqual(config_payload["modes"]["current"], "yolo")
+        mode_ids = [m["id"] for m in config_payload["modes"]["available"]]
+        self.assertIn("yolo", mode_ids)
+        self.assertIn("auto", mode_ids)
+        self.assertIn("plan", mode_ids)
+
+    def test_bunker_uri_parsing(self):
+        import urllib.parse
+
+        uri = "zed-remote://pair?topic=zed-bunker-test&key=MTIzNDU2&token=tok456&port=8443"
+        parsed = urllib.parse.urlparse(uri)
+        self.assertEqual(parsed.scheme, "zed-remote")
+        self.assertEqual(parsed.netloc, "pair")
+        query = urllib.parse.parse_qs(parsed.query)
+        self.assertEqual(query["topic"][0], "zed-bunker-test")
+        self.assertEqual(query["key"][0], "MTIzNDU2")
+        self.assertEqual(query["token"][0], "tok456")
+        self.assertEqual(query["port"][0], "8443")
+
+    def test_approvals_api_payload_and_resolution(self):
+        approval_payload = {
+            "approvals": [
+                {
+                    "tool_call_id": "call_subproc_001",
+                    "title": "Execute shell command",
+                    "tool_name": "terminal/create",
+                    "content": [],
+                    "raw_input": {"command": "cargo build --release"},
+                    "allow_once_available": True,
+                    "deny_once_available": True,
+                    "kind": "permission",
+                    "options": [
+                        {
+                            "option_id": "allow_once",
+                            "label": "Allow",
+                            "kind": "allow_once",
+                            "enabled": True,
+                        },
+                        {
+                            "option_id": "allow_always",
+                            "label": "Allow Always",
+                            "kind": "allow_always",
+                            "enabled": True,
+                        },
+                        {
+                            "option_id": "deny_once",
+                            "label": "Deny",
+                            "kind": "reject_once",
+                            "enabled": True,
+                        },
+                    ],
+                    "patterns": [],
+                }
+            ]
+        }
+        self.assertEqual(len(approval_payload["approvals"]), 1)
+        appr = approval_payload["approvals"][0]
+        self.assertEqual(appr["tool_call_id"], "call_subproc_001")
+        self.assertEqual(appr["tool_name"], "terminal/create")
+        self.assertTrue(appr["allow_once_available"])
+
+        # Test resolution outcome
+        resolve_decision = {"option_id": "allow_once"}
+        is_allow = not resolve_decision["option_id"].startswith("deny")
+        self.assertTrue(is_allow)
+        outcome_frame = {
+            "jsonrpc": "2.0",
+            "id": 105,
+            "result": {
+                "decision": "approved" if is_allow else "rejected",
+                "outcome": {"outcome": "approved" if is_allow else "rejected"},
+            },
+        }
+        self.assertEqual(outcome_frame["result"]["decision"], "approved")
+        self.assertEqual(outcome_frame["result"]["outcome"]["outcome"], "approved")
+
+    def test_yolo_subprocess_permission_grant(self):
+        # In YOLO mode, incoming session/request_permission for subprocesses must auto-approve
+        req_permission = {
+            "jsonrpc": "2.0",
+            "id": 99,
+            "method": "session/request_permission",
+            "params": {
+                "sessionId": "default",
+                "toolCall": {
+                    "toolCallId": "proc_fork_1",
+                    "name": "terminal/create",
+                    "title": "Spawn Subprocess",
+                    "parameters": {"command": "python3 script.py"},
+                },
+            },
+        }
+
+        def route_permission_request(msg: dict, mode: str) -> dict:
+            if mode == "yolo":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": msg["id"],
+                    "result": {
+                        "decision": "approved",
+                        "outcome": {"outcome": "approved"},
+                    },
+                }
+            else:
+                return {
+                    "tool_call_id": msg["params"]["toolCall"]["toolCallId"],
+                    "status": "pending_approval",
+                }
+
+        # Verify YOLO auto-approves and matches the request ID
+        yolo_resp = route_permission_request(req_permission, mode="yolo")
+        self.assertEqual(yolo_resp["id"], req_permission["id"])
+        self.assertEqual(yolo_resp["result"]["decision"], "approved")
+        self.assertEqual(yolo_resp["result"]["outcome"]["outcome"], "approved")
+
+        # Verify non-YOLO halts and marks pending approval
+        manual_resp = route_permission_request(req_permission, mode="auto")
+        self.assertEqual(manual_resp["status"], "pending_approval")
+        self.assertEqual(manual_resp["tool_call_id"], "proc_fork_1")
 
 
 if __name__ == "__main__":

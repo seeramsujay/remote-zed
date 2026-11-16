@@ -24,10 +24,12 @@ import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderSpecial
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -84,9 +86,10 @@ fun FilesScreen(
     onListDirectory: suspend (String?) -> FsDirectoryResult,
     onCreateFolder: suspend (String) -> Unit,
     onSetWorkspace: suspend (String) -> Unit,
+    onTrustDirectory: suspend (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    var currentPath by remember { mutableStateOf(initialPath ?: "/home") }
+    var currentPath by remember { mutableStateOf(initialPath?.ifBlank { "~/Projects" } ?: "~/Projects") }
     var parentPath by remember { mutableStateOf<String?>(null) }
     val files = remember { mutableStateListOf<RemoteFileItem>() }
     var loading by remember { mutableStateOf(false) }
@@ -114,7 +117,7 @@ fun FilesScreen(
     }
 
     LaunchedEffect(Unit) {
-        loadDir(initialPath)
+        loadDir(if (initialPath.isNullOrBlank() || initialPath == "/home") "~/Projects" else initialPath)
     }
 
     if (showNewFolderDialog) {
@@ -212,6 +215,35 @@ fun FilesScreen(
                         }
                     }
 
+                    // Quick Root Selectors: ~/Projects and /dev/shm
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Roots:",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        FilterChip(
+                            selected = currentPath.contains("Projects"),
+                            onClick = { loadDir("~/Projects") },
+                            label = { Text("~/Projects") },
+                            leadingIcon = {
+                                Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(14.dp))
+                            },
+                        )
+                        FilterChip(
+                            selected = currentPath.startsWith("/dev/shm"),
+                            onClick = { loadDir("/dev/shm") },
+                            label = { Text("/dev/shm") },
+                            leadingIcon = {
+                                Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(14.dp))
+                            },
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Row(
@@ -247,6 +279,25 @@ fun FilesScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Set Workspace", style = MaterialTheme.typography.labelMedium)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    onTrustDirectory(currentPath)
+                                    statusMessage = "Explicitly trusted: $currentPath"
+                                }
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Security,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = androidx.compose.ui.graphics.Color(0xFF34D399),
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Trust", style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }

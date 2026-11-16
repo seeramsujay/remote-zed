@@ -124,6 +124,10 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     },
+                    onPastePairing = { payload ->
+                        scannerFeedback = "Pairing with provided ticket…"
+                        vm.pairQr(payload, phoneLabel())
+                    },
                 )
             }
         }
@@ -177,6 +181,7 @@ fun ZedApp(
     scannerFeedback: String? = null,
     onNotificationPermissionNeeded: () -> Unit = {},
     onScanQr: () -> Unit = {},
+    onPastePairing: (String) -> Unit = {},
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -233,6 +238,7 @@ fun ZedApp(
         enabled = drawerState.isOpen || state.page in listOf(
             Page.CHAT,
             Page.CHANGES,
+            Page.GIT,
             Page.SETTINGS,
             Page.TERMINAL,
             Page.FILES
@@ -249,9 +255,6 @@ fun ZedApp(
         drawerState = drawerState,
         gesturesEnabled = state.page != Page.PAIR,
         drawerContent = {
-            // Always compose the sheet: the drawer measures its closed offset from the sheet's
-            // width, so an empty sheet on the pairing page would leave it stuck open afterwards.
-            // Gestures are disabled and no menu button is shown while pairing.
             MobileNavigationDrawer(
                 state = state,
                 onDestination = { page ->
@@ -259,6 +262,7 @@ fun ZedApp(
                         drawerState.close()
                         when (page) {
                             Page.PROJECTS -> vm.showProjects()
+                            Page.GIT -> vm.showGit()
                             Page.SETTINGS -> vm.showSettings()
                             Page.TERMINAL -> vm.showTerminal()
                             Page.FILES -> vm.showFiles()
@@ -272,6 +276,7 @@ fun ZedApp(
                         vm.openThread(recent.thread, recent.project)
                     }
                 },
+                onReconnect = { vm.reconnect() },
             )
         },
     ) {
@@ -281,6 +286,7 @@ fun ZedApp(
             scanning = scanning,
             scannerFeedback = scannerFeedback,
             onScanQr = onScanQr,
+            onPastePairing = onPastePairing,
             stayConnected = stayConnected ?: true,
             onStayConnectedChange = { enabled ->
                 settingsScope.launch {

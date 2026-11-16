@@ -33,12 +33,12 @@ class ZedViewModelPairingTest {
         val ticket = PairingTicket(
             origin = "https://zed.example:7443",
             ticketId = "ticket-123",
-            secret = "secret-ABC_123",
+            secret = "secret-ABC_123", // gitleaks:allow
         )
         val credential = DeviceCredential(
             origin = ticket.origin,
             deviceId = "device-123",
-            credential = "credential-ABC_123",
+            credential = "credential-ABC_123", // gitleaks:allow
         )
         val store = InMemoryCredentialStore()
         val catalogStore = InMemoryProjectCatalogStore()

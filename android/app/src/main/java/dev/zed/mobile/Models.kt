@@ -252,6 +252,8 @@ data class DeviceCredential(
     val origin: String,
     val deviceId: String,
     val credential: String,
+    val bunkerTopic: String? = null,
+    val bunkerKey: String? = null,
 )
 
 interface ZedRepository {
@@ -318,10 +320,55 @@ interface ZedRepository {
     suspend fun fsList(path: String?): FsDirectoryResult = unsupported("File listing")
     suspend fun fsMkdir(path: String): String = unsupported("Directory creation")
     suspend fun workspaceSet(path: String): String = unsupported("Workspace configuration")
+    suspend fun fsTrust(path: String): Unit = unsupported("Workspace trust")
+
+    /** Native Git repository management */
+    suspend fun gitStatus(): GitStatusResult = unsupported("Git status")
+    suspend fun gitStage(paths: List<String>): Unit = unsupported("Git stage")
+    suspend fun gitUnstage(paths: List<String>): Unit = unsupported("Git unstage")
+    suspend fun gitCommit(message: String, stageAll: Boolean): GitCommitResult = unsupported("Git commit")
+    suspend fun gitPush(remote: String? = null, branch: String? = null): Unit = unsupported("Git push")
+    suspend fun gitBranches(): List<String> = unsupported("Git branches")
+    suspend fun gitCheckout(branch: String): Unit = unsupported("Git checkout")
+    suspend fun gitLogGraph(): List<GitCommitInfo> = unsupported("Git log")
 
     private fun <T> unsupported(feature: String): T =
         throw GatewayException("$feature requires Zed-Desktop Mobile Gateway API v2.")
 }
+
+/** Status of an individual tracked/untracked file in the Git repository. */
+data class GitFileStatus(
+    val path: String,
+    val status: String,
+    val staged: Boolean,
+    val insertions: Int = 0,
+    val deletions: Int = 0,
+)
+
+/** Repository Git status summary. */
+data class GitStatusResult(
+    val branch: String,
+    val clean: Boolean,
+    val ahead: Int = 0,
+    val behind: Int = 0,
+    val files: List<GitFileStatus> = emptyList(),
+)
+
+/** Commit info for mobile Git graph and history log inspection. */
+data class GitCommitInfo(
+    val hash: String,
+    val author: String,
+    val date: String,
+    val decorations: String,
+    val message: String,
+)
+
+/** Result of a commit operation. */
+data class GitCommitResult(
+    val commitHash: String,
+    val branch: String,
+    val summary: String,
+)
 
 /** The unauthenticated, one-time v2 pairing operation. */
 interface PairingRepository {

@@ -2,14 +2,17 @@
 
 use crate::error::{DaemonError, Result};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use subtle::ConstantTimeEq;
-use tracing::warn;
+use tokio::sync::RwLock;
+use tracing::{info, warn};
 
 /// Security validator enforcing execution boundaries and command policies.
 #[derive(Clone, Debug)]
 pub struct SecurityGuard {
     blocked_commands: Vec<String>,
     workspace_root: PathBuf,
+    trusted_roots: Arc<RwLock<Vec<PathBuf>>>,
 }
 
 impl SecurityGuard {
@@ -30,9 +33,33 @@ impl SecurityGuard {
             }
         }
 
+        // Initialize trusted roots with workspace root, /dev/shm, and ~/Projects
+        let mut initial_trusted = vec![
+            workspace_root.clone(),
+            PathBuf::from("/dev/shm"),
+        ];
+
+        if let Ok(home) = std::env::var("HOME") {
+            let projects = PathBuf::from(home).join("Projects");
+            if !initial_trusted.contains(&projects) {
+                initial_trusted.push(projects);
+            }
+        }
+
         Self {
             blocked_commands,
             workspace_root,
+            trusted_roots: Arc::new(RwLock::new(initial_trusted)),
+        }
+    }
+
+    /// Dynamically trusts an additional directory root requested by phone or user.
+    pub async fn trust_path(&self, path: PathBuf) {
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+        let mut roots = self.trusted_roots.write().await;
+        if !roots.contains(&canonical) {
+            info!("Phone explicitly trusted directory boundary: {:?}", canonical);
+            roots.push(canonical);
         }
     }
 
@@ -51,7 +78,7 @@ impl SecurityGuard {
         Ok(())
     }
 
-    /// Validates that a file path remains within the active workspace root to prevent path traversal.
+    /// Validates that a file path remains within trusted workspace boundaries.
     pub fn check_path(&self, target_path: &Path) -> Result<PathBuf> {
         let canonical_root = self
             .workspace_root
@@ -68,18 +95,28 @@ impl SecurityGuard {
             .canonicalize()
             .unwrap_or_else(|_| target_full.clone());
 
-        if !canonical_target.starts_with(&canonical_root) {
-            warn!(
-                "Path traversal detected: target {:?} outside workspace root {:?}",
-                canonical_target, canonical_root
-            );
-            return Err(DaemonError::Security(format!(
-                "Target path {:?} is outside workspace root",
-                target_path
-            )));
+        if canonical_target.starts_with(&canonical_root) {
+            return Ok(canonical_target);
         }
 
-        Ok(canonical_target)
+        // Check if allowed by trusted roots
+        if let Ok(roots) = self.trusted_roots.try_read() {
+            for trusted in roots.iter() {
+                let canon_trusted = trusted.canonicalize().unwrap_or_else(|_| trusted.clone());
+                if canonical_target.starts_with(&canon_trusted) {
+                    return Ok(canonical_target);
+                }
+            }
+        }
+
+        warn!(
+            "Path traversal detected: target {:?} outside trusted roots",
+            canonical_target
+        );
+        Err(DaemonError::Security(format!(
+            "Target path {:?} is outside trusted workspace boundaries",
+            target_path
+        )))
     }
 
     /// Performs constant-time token comparison to prevent timing side-channel attacks.

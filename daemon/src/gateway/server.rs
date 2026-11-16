@@ -5,10 +5,12 @@ use crate::gateway::auth::AuthValidator;
 use crate::git::GitEngine;
 use crate::protocol::{error_codes, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse, RequestId};
 use crate::proxy::MessageRouter;
+use crate::security::SecurityGuard;
 use crate::session::SessionManager;
 use crate::telemetry::{PowerAction, TelemetryCollector};
 use crate::terminal::TerminalManager;
 use futures_util::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -17,6 +19,100 @@ use tokio_tungstenite::accept_hdr_async;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
+
+fn percent_decode(s: &str) -> String {
+    let mut bytes = Vec::new();
+    let mut chars = s.bytes();
+    while let Some(b) = chars.next() {
+        if b == b'%' {
+            let h1 = chars.next();
+            let h2 = chars.next();
+            if let (Some(c1), Some(c2)) = (h1, h2) {
+                if let Ok(byte) = u8::from_str_radix(&format!("{}{}", c1 as char, c2 as char), 16) {
+                    bytes.push(byte);
+                    continue;
+                }
+            }
+        } else if b == b'+' {
+            bytes.push(b' ');
+            continue;
+        }
+        bytes.push(b);
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+fn default_agent_id() -> String {
+    "antigravity".to_string()
+}
+
+fn default_mode() -> String {
+    "yolo".to_string()
+}
+
+fn is_binary_available(name: &str) -> bool {
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path) {
+            if dir.join(name).is_file() {
+                return true;
+            }
+        }
+    }
+    let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
+    let standard_dirs = [
+        home.as_ref().map(|h| h.join(".local/bin")),
+        home.as_ref().map(|h| h.join(".cargo/bin")),
+        home.as_ref().map(|h| h.join(".npm-global/bin")),
+        Some(std::path::PathBuf::from("/usr/local/bin")),
+        Some(std::path::PathBuf::from("/usr/bin")),
+    ];
+    for dir in standard_dirs.into_iter().flatten() {
+        if dir.join(name).is_file() {
+            return true;
+        }
+    }
+    false
+}
+
+/// A custom user thread representation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CustomThread {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    #[serde(default = "default_agent_id")]
+    pub agent_id: String,
+    #[serde(default = "default_mode")]
+    pub mode: String,
+    #[serde(default)]
+    pub active_session_id: Option<String>,
+    #[serde(default)]
+    pub messages: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub transcript: Vec<serde_json::Value>,
+}
+
+/// State of an active thread for v2 mobile clients.
+#[derive(Clone, Debug)]
+pub struct ThreadState {
+    pub current_mode: String,
+    pub active_session_id: Option<String>,
+    pub messages: Vec<serde_json::Value>,
+    pub transcript: Vec<serde_json::Value>,
+    pub custom_threads: Vec<CustomThread>,
+}
+
+impl Default for ThreadState {
+    fn default() -> Self {
+        Self {
+            current_mode: "yolo".to_string(),
+            active_session_id: None,
+            messages: Vec::new(),
+            transcript: Vec::new(),
+            custom_threads: Vec::new(),
+        }
+    }
+}
 
 /// Orchestrates the mobile WebSocket gateway.
 pub struct WebSocketGateway {
@@ -27,6 +123,8 @@ pub struct WebSocketGateway {
     git: GitEngine,
     telemetry: Arc<TelemetryCollector>,
     terminal: Arc<TerminalManager>,
+    security: SecurityGuard,
+    thread_state: Arc<tokio::sync::Mutex<ThreadState>>,
 }
 
 impl WebSocketGateway {
@@ -39,6 +137,7 @@ impl WebSocketGateway {
         git: GitEngine,
         telemetry: Arc<TelemetryCollector>,
         terminal: Arc<TerminalManager>,
+        security: SecurityGuard,
     ) -> Self {
         Self {
             bind_addr,
@@ -48,6 +147,8 @@ impl WebSocketGateway {
             git,
             telemetry,
             terminal,
+            security,
+            thread_state: Arc::new(tokio::sync::Mutex::new(ThreadState::default())),
         }
     }
 
@@ -66,6 +167,8 @@ impl WebSocketGateway {
                     let git = self.git.clone();
                     let telemetry = Arc::clone(&self.telemetry);
                     let terminal = Arc::clone(&self.terminal);
+                    let security = self.security.clone();
+                    let thread_state = Arc::clone(&self.thread_state);
 
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_connection(
@@ -77,6 +180,8 @@ impl WebSocketGateway {
                             git,
                             telemetry,
                             terminal,
+                            security,
+                            thread_state,
                         )
                         .await
                         {
@@ -101,6 +206,8 @@ impl WebSocketGateway {
         git: GitEngine,
         telemetry: Arc<TelemetryCollector>,
         terminal: Arc<TerminalManager>,
+        security: SecurityGuard,
+        thread_state: Arc<tokio::sync::Mutex<ThreadState>>,
     ) -> Result<()> {
         // Detect standard HTTP REST requests vs WebSocket upgrades
         let mut peek_buf = [0u8; 512];
@@ -108,15 +215,22 @@ impl WebSocketGateway {
         let peek_str = std::str::from_utf8(&peek_buf[..bytes_peeked]).unwrap_or("");
 
         let is_websocket = peek_str.to_lowercase().contains("upgrade: websocket");
-        if !is_websocket && (peek_str.starts_with("GET ") || peek_str.starts_with("POST ") || peek_str.starts_with("OPTIONS ")) {
+        let is_http = peek_str.starts_with("GET ")
+            || peek_str.starts_with("POST ")
+            || peek_str.starts_with("PUT ")
+            || peek_str.starts_with("DELETE ")
+            || peek_str.starts_with("OPTIONS ");
+        if !is_websocket && is_http {
             return Self::handle_http_request(
                 stream,
                 peer_addr,
                 auth,
                 terminal,
                 git,
+                security,
                 session_manager,
                 router,
+                thread_state,
             ).await;
         }
 
@@ -488,9 +602,11 @@ impl WebSocketGateway {
         peer_addr: SocketAddr,
         auth: AuthValidator,
         terminal: Arc<TerminalManager>,
-        _git: GitEngine,
-        _session_manager: SessionManager,
+        git: GitEngine,
+        security: SecurityGuard,
+        session_manager: SessionManager,
         router: MessageRouter,
+        thread_state: Arc<tokio::sync::Mutex<ThreadState>>,
     ) -> Result<()> {
         let mut buffer = vec![0u8; 16384];
         let bytes_read = stream.read(&mut buffer).await.unwrap_or(0);
@@ -544,13 +660,31 @@ impl WebSocketGateway {
                 "version": "2.0.0",
                 "gateway": "zed-remote-daemon"
             }))
-        } else if path == "/v2/pair/claim" && method == "POST" {
+        } else if path == "/v1/status" {
             (200, serde_json::json!({
-                "device_id": "bunker-phone",
-                "credential": auth.token()
+                "status": "ok",
+                "api_version": 1,
+                "name": "Zed-Desktop",
+                "version": "2.0.0",
+                "gateway": "zed-remote-daemon"
             }))
+        } else if path == "/v2/pair/claim" && method == "POST" {
+            let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+            let secret = body_json.get("secret").and_then(|v| v.as_str()).unwrap_or("");
+            let ticket_id = body_json.get("ticket_id").and_then(|v| v.as_str()).unwrap_or("");
+            if (!secret.is_empty() && auth.validate(secret)) || (!ticket_id.is_empty() && auth.validate(ticket_id)) {
+                (200, serde_json::json!({
+                    "device_id": "bunker-phone",
+                    "credential": auth.token()
+                }))
+            } else {
+                warn!("Unauthorized pair claim attempt from {}", peer_addr);
+                let err_resp = "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 26\r\n\r\n{\"error\":\"unauthorized\"}";
+                let _ = stream.write_all(err_resp.as_bytes()).await;
+                return Ok(());
+            }
         } else {
-            if !token.is_empty() && !auth.validate(token) {
+            if token.is_empty() || !auth.validate(token) {
                 warn!("Rejecting unauthorized HTTP request to {} from {}", path, peer_addr);
                 let err_resp = "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 26\r\n\r\n{\"error\":\"unauthorized\"}";
                 let _ = stream.write_all(err_resp.as_bytes()).await;
@@ -573,37 +707,398 @@ impl WebSocketGateway {
                     }]
                 }))
             } else if path.ends_with("/threads") && method == "GET" {
-                (200, serde_json::json!({
-                    "threads": [{
-                        "id": "main-thread",
-                        "title": "AntiGravity AI Workspace",
-                        "status": "ready"
-                    }]
-                }))
-            } else if path.ends_with("/agents") && method == "GET" {
-                (200, serde_json::json!({
-                    "agents": [{
+                let state = thread_state.lock().await;
+                let mut threads_list = vec![serde_json::json!({
+                    "id": "main-thread",
+                    "title": "AntiGravity AI Workspace",
+                    "status": "ready",
+                    "agent": {
                         "id": "antigravity",
                         "name": "AntiGravity Agent",
                         "is_native": false
-                    }]
+                    }
+                })];
+                for ct in &state.custom_threads {
+                    let agent_name = if ct.agent_id == "pi" { "Pi Agent" } else { "AntiGravity Agent" };
+                    threads_list.push(serde_json::json!({
+                        "id": ct.id,
+                        "title": ct.title,
+                        "status": ct.status,
+                        "agent": {
+                            "id": ct.agent_id,
+                            "name": agent_name,
+                            "is_native": false
+                        }
+                    }));
+                }
+                (200, serde_json::json!({ "threads": threads_list }))
+            } else if (path == "/v2/threads" || path.ends_with("/threads")) && method == "POST" {
+                let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                let agent_id = body_json.get("agent_id").and_then(|v| v.as_str()).unwrap_or("antigravity").to_string();
+                let (agent_name, title) = if agent_id == "pi" {
+                    ("Pi Agent", "Pi Conversation")
+                } else {
+                    ("AntiGravity Agent", "New Conversation")
+                };
+                let thread_id = format!("thread-{}", uuid::Uuid::new_v4());
+                let new_thread = CustomThread {
+                    id: thread_id.clone(),
+                    title: title.to_string(),
+                    status: "ready".to_string(),
+                    agent_id: agent_id.clone(),
+                    mode: "yolo".to_string(),
+                    active_session_id: None,
+                    messages: Vec::new(),
+                    transcript: Vec::new(),
+                };
+                let mut state = thread_state.lock().await;
+                state.custom_threads.push(new_thread);
+                drop(state);
+
+                (200, serde_json::json!({
+                    "id": thread_id,
+                    "title": title,
+                    "status": "ready",
+                    "agent": {
+                        "id": agent_id,
+                        "name": agent_name,
+                        "is_native": false
+                    }
                 }))
+            } else if path.ends_with("/agents") && method == "GET" {
+                (200, serde_json::json!({
+                    "agents": [
+                        {
+                            "id": "antigravity",
+                            "name": "AntiGravity Agent",
+                            "is_native": false
+                        },
+                        {
+                            "id": "pi",
+                            "name": "Pi Agent",
+                            "is_native": false
+                        }
+                    ]
+                }))
+            } else if path.contains("/threads/") && path.ends_with("/configuration") {
+                let parts: Vec<&str> = path.split('/').collect();
+                let req_thread_id = parts.iter().position(|&p| p == "threads")
+                    .and_then(|idx| parts.get(idx + 1))
+                    .copied()
+                    .unwrap_or("main-thread");
+
+                if method == "PUT" {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let mut state = thread_state.lock().await;
+                    let mode_id = body_json.get("mode_id").and_then(|v| v.as_str()).unwrap_or("yolo").to_string();
+                    if req_thread_id == "main-thread" {
+                        state.current_mode = mode_id.clone();
+                        router.set_mode(&mode_id).await;
+                    } else if let Some(ct) = state.custom_threads.iter_mut().find(|t| t.id == req_thread_id) {
+                        ct.mode = mode_id.clone();
+                    }
+                    let (agent_id, agent_name, mode) = if req_thread_id == "main-thread" {
+                        ("antigravity".to_string(), "AntiGravity Agent".to_string(), state.current_mode.clone())
+                    } else if let Some(ct) = state.custom_threads.iter().find(|t| t.id == req_thread_id) {
+                        let name = if ct.agent_id == "pi" { "Pi Agent" } else { "AntiGravity Agent" };
+                        (ct.agent_id.clone(), name.to_string(), ct.mode.clone())
+                    } else {
+                        ("antigravity".to_string(), "AntiGravity Agent".to_string(), "yolo".to_string())
+                    };
+                    drop(state);
+                    (200, serde_json::json!({
+                        "model": null,
+                        "thinking_enabled": false,
+                        "agent": {
+                            "id": agent_id,
+                            "name": agent_name,
+                            "is_native": false
+                        },
+                        "modes": {
+                            "current": mode,
+                            "available": [
+                                {
+                                    "id": "yolo",
+                                    "name": "YOLO",
+                                    "description": "Autonomous auto-pilot with auto-approved permissions (--dangerously-skip-permissions)"
+                                },
+                                {
+                                    "id": "auto",
+                                    "name": "Auto",
+                                    "description": "Autonomous execution with permission confirmations"
+                                },
+                                {
+                                    "id": "plan",
+                                    "name": "Plan",
+                                    "description": "Read-only planning without modifications"
+                                }
+                            ]
+                        },
+                        "options": []
+                    }))
+                } else {
+                    let state = thread_state.lock().await;
+                    let (agent_id, agent_name, mode) = if req_thread_id == "main-thread" {
+                        ("antigravity".to_string(), "AntiGravity Agent".to_string(), state.current_mode.clone())
+                    } else if let Some(ct) = state.custom_threads.iter().find(|t| t.id == req_thread_id) {
+                        let name = if ct.agent_id == "pi" { "Pi Agent" } else { "AntiGravity Agent" };
+                        (ct.agent_id.clone(), name.to_string(), ct.mode.clone())
+                    } else {
+                        ("antigravity".to_string(), "AntiGravity Agent".to_string(), state.current_mode.clone())
+                    };
+                    drop(state);
+                    (200, serde_json::json!({
+                        "model": null,
+                        "thinking_enabled": false,
+                        "agent": {
+                            "id": agent_id,
+                            "name": agent_name,
+                            "is_native": false
+                        },
+                        "modes": {
+                            "current": mode,
+                            "available": [
+                                {
+                                    "id": "yolo",
+                                    "name": "YOLO",
+                                    "description": "Autonomous auto-pilot with auto-approved permissions (--dangerously-skip-permissions)"
+                                },
+                                {
+                                    "id": "auto",
+                                    "name": "Auto",
+                                    "description": "Autonomous execution with permission confirmations"
+                                },
+                                {
+                                    "id": "plan",
+                                    "name": "Plan",
+                                    "description": "Read-only planning without modifications"
+                                }
+                            ]
+                        },
+                        "options": []
+                    }))
+                }
             } else if path.contains("/threads/") && path.ends_with("/changes") && method == "GET" {
                 (200, serde_json::json!({
                     "files": []
                 }))
-            } else if path.contains("/threads/") && method == "GET" {
-                (200, serde_json::json!({
-                    "id": "main-thread",
-                    "title": "AntiGravity AI Workspace",
-                    "status": "ready",
-                    "messages": [],
-                    "transcript": []
-                }))
-            } else if method == "POST" && (path.ends_with("/messages") || path.ends_with("/cancel")) {
+            } else if path.contains("/threads/") && path.ends_with("/messages") && method == "POST" {
+                let parts: Vec<&str> = path.split('/').collect();
+                let req_thread_id = parts.iter().position(|&p| p == "threads")
+                    .and_then(|idx| parts.get(idx + 1))
+                    .copied()
+                    .unwrap_or("main-thread");
+
+                let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                let text = body_json.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                if !text.is_empty() {
+                    let agent_id = {
+                        let mut state = thread_state.lock().await;
+                        if req_thread_id == "main-thread" {
+                            if state.messages.is_empty() {
+                                let recovered = session_manager.get_chat_messages(state.active_session_id.as_deref()).await;
+                                if !recovered.is_empty() {
+                                    state.messages = recovered;
+                                }
+                            }
+                        } else if let Some(ct) = state.custom_threads.iter_mut().find(|t| t.id == req_thread_id) {
+                            if ct.messages.is_empty() {
+                                let recovered = session_manager.get_chat_messages(ct.active_session_id.as_deref()).await;
+                                if !recovered.is_empty() {
+                                    ct.messages = recovered;
+                                }
+                            }
+                        }
+
+                        let user_msg = serde_json::json!({ "role": "user", "text": text });
+                        let user_transcript = serde_json::json!({
+                            "kind": "user_message",
+                            "body": text,
+                            "timestamp": chrono::Utc::now().to_rfc3339()
+                        });
+                        if req_thread_id == "main-thread" {
+                            state.messages.push(user_msg);
+                            state.transcript.push(user_transcript);
+                            "antigravity".to_string()
+                        } else if let Some(ct) = state.custom_threads.iter_mut().find(|t| t.id == req_thread_id) {
+                            ct.messages.push(user_msg);
+                            ct.transcript.push(user_transcript);
+                            ct.agent_id.clone()
+                        } else {
+                            "antigravity".to_string()
+                        }
+                    };
+
+                    if agent_id == "pi" && !is_binary_available("pi-acp") && !is_binary_available("pi") {
+                        let reply_text = "Pi Agent is configured in YOLO mode, but the 'pi' or 'pi-acp' executable is not yet installed on this host.\n\nTo install it on desktop, run:\n```bash\nnpm install -g @earendil-works/pi-coding-agent\nnpm install -g @victor-software-house/pi-acp\n```\nOnce installed, Pi will automatically connect with full YOLO autonomy.";
+
+                        let mut state = thread_state.lock().await;
+                        let asst_msg = serde_json::json!({ "role": "assistant", "text": reply_text });
+                        let asst_transcript = serde_json::json!({
+                            "kind": "assistant_message",
+                            "body": reply_text,
+                            "timestamp": chrono::Utc::now().to_rfc3339()
+                        });
+                        if req_thread_id == "main-thread" {
+                            state.messages.push(asst_msg);
+                            state.transcript.push(asst_transcript);
+                        } else if let Some(ct) = state.custom_threads.iter_mut().find(|t| t.id == req_thread_id) {
+                            ct.messages.push(asst_msg);
+                            ct.transcript.push(asst_transcript);
+                        }
+                        drop(state);
+
+                        let notif = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "method": "session/update",
+                            "params": {
+                                "sessionId": req_thread_id,
+                                "update": {
+                                    "sessionUpdateType": "agent_message",
+                                    "content": [{
+                                        "type": "text",
+                                        "text": reply_text
+                                    }]
+                                }
+                            }
+                        }).to_string();
+                        let _ = router.mobile_broadcast_tx.send(notif);
+                    } else {
+                        let prompt_rpc = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "session/prompt",
+                            "params": {
+                                "sessionId": req_thread_id,
+                                "prompt": [{
+                                    "type": "text",
+                                    "text": text
+                                }]
+                            }
+                        }).to_string();
+                        let _ = router.handle_mobile_message(&prompt_rpc).await;
+                    }
+                }
                 (200, serde_json::json!({
                     "accepted": true
                 }))
+            } else if path.contains("/threads/") && path.ends_with("/cancel") && method == "POST" {
+                let cancel_rpc = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "session/cancel",
+                    "params": {
+                        "sessionId": "default"
+                    }
+                }).to_string();
+                let _ = router.handle_mobile_message(&cancel_rpc).await;
+                (200, serde_json::json!({
+                    "accepted": true
+                }))
+            } else if path.contains("/threads/") && path.ends_with("/approvals") && method == "GET" {
+                let approvals = router.get_pending_approvals().await;
+                (200, serde_json::json!({
+                    "approvals": approvals
+                }))
+            } else if path.contains("/threads/") && path.contains("/approvals/") && path.ends_with("/resolve") && method == "POST" {
+                let tool_call_id = path
+                    .strip_suffix("/resolve")
+                    .and_then(|p| p.split("/approvals/").nth(1))
+                    .unwrap_or("");
+                let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                let option_id = body_json
+                    .get("option_id")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| body_json.get("decision").and_then(|v| v.as_str()))
+                    .unwrap_or("allow_once");
+                let resolved = router.resolve_approval(tool_call_id, option_id).await;
+                if resolved {
+                    (200, serde_json::json!({ "accepted": true }))
+                } else {
+                    (404, serde_json::json!({ "error": "Approval not found or already resolved" }))
+                }
+            } else if path.contains("/threads/") && path.ends_with("/elicitations") && method == "GET" {
+                (200, serde_json::json!({
+                    "elicitations": []
+                }))
+            } else if path.contains("/threads/") && path.contains("/elicitations/") && path.ends_with("/respond") && method == "POST" {
+                (200, serde_json::json!({
+                    "accepted": true
+                }))
+            } else if (path.starts_with("/v2/threads/") || path.starts_with("/threads/")) && method == "GET" {
+                let thread_id = path.rsplit('/').next().unwrap_or("main-thread");
+                let mut state = thread_state.lock().await;
+                let approvals = router.get_pending_approvals().await;
+                if thread_id == "main-thread" {
+                    if state.messages.is_empty() {
+                        let recovered = session_manager.get_chat_messages(state.active_session_id.as_deref()).await;
+                        if !recovered.is_empty() {
+                            state.messages = recovered;
+                        }
+                    }
+                    let messages = state.messages.clone();
+                    let transcript = state.transcript.clone();
+                    drop(state);
+                    (200, serde_json::json!({
+                        "id": "main-thread",
+                        "title": "AntiGravity AI Workspace",
+                        "status": "ready",
+                        "agent": {
+                            "id": "antigravity",
+                            "name": "AntiGravity Agent",
+                            "is_native": false
+                        },
+                        "messages": messages,
+                        "transcript": transcript,
+                        "approvals": approvals,
+                        "elicitations": []
+                    }))
+                } else if let Some(ct) = state.custom_threads.iter_mut().find(|t| t.id == thread_id) {
+                    let agent_name = if ct.agent_id == "pi" { "Pi Agent" } else { "AntiGravity Agent" };
+                    if ct.messages.is_empty() {
+                        let recovered = session_manager.get_chat_messages(ct.active_session_id.as_deref()).await;
+                        if !recovered.is_empty() {
+                            ct.messages = recovered;
+                        }
+                    }
+                    let ct_id = ct.id.clone();
+                    let title = ct.title.clone();
+                    let status = ct.status.clone();
+                    let agent_id = ct.agent_id.clone();
+                    let messages = ct.messages.clone();
+                    let transcript = ct.transcript.clone();
+                    drop(state);
+                    (200, serde_json::json!({
+                        "id": ct_id,
+                        "title": title,
+                        "status": status,
+                        "agent": {
+                            "id": agent_id,
+                            "name": agent_name,
+                            "is_native": false
+                        },
+                        "messages": messages,
+                        "transcript": transcript,
+                        "approvals": approvals,
+                        "elicitations": []
+                    }))
+                } else {
+                    drop(state);
+                    (200, serde_json::json!({
+                        "id": thread_id,
+                        "title": "New Conversation",
+                        "status": "ready",
+                        "agent": {
+                            "id": "antigravity",
+                            "name": "AntiGravity Agent",
+                            "is_native": false
+                        },
+                        "messages": [],
+                        "transcript": [],
+                        "approvals": approvals,
+                        "elicitations": []
+                    }))
+                }
             } else {
                 match (method, path) {
                 ("POST", "/v2/terminal/exec") => {
@@ -618,11 +1113,14 @@ impl WebSocketGateway {
                     let mut target_path = None;
                     for param in query.split('&') {
                         if let Some(val) = param.strip_prefix("path=") {
-                            target_path = Some(val);
+                            let decoded = percent_decode(val);
+                            if !decoded.trim().is_empty() {
+                                target_path = Some(decoded);
+                            }
                             break;
                         }
                     }
-                    match terminal.list_directory(target_path).await {
+                    match terminal.list_directory(target_path.as_deref()).await {
                         Ok(res) => (200, serde_json::to_value(res).unwrap_or_default()),
                         Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
                     }
@@ -640,6 +1138,93 @@ impl WebSocketGateway {
                     let path_arg = body_json.get("path").and_then(|v| v.as_str()).unwrap_or("");
                     match terminal.set_cwd(std::path::Path::new(path_arg)).await {
                         Ok(p) => (200, serde_json::json!({ "workspace": p, "accepted": true })),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("POST", "/v2/workspace/trust") => {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let path_arg = body_json.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                    let expanded = if path_arg.starts_with('~') {
+                        if let Ok(home) = std::env::var("HOME") {
+                            path_arg.replacen('~', &home, 1)
+                        } else {
+                            path_arg.to_string()
+                        }
+                    } else {
+                        path_arg.to_string()
+                    };
+                    security.trust_path(std::path::PathBuf::from(&expanded)).await;
+                    (200, serde_json::json!({ "trusted": true, "path": expanded }))
+                }
+                ("GET", "/v2/git/status") => {
+                    match git.status().await {
+                        Ok(st) => (200, serde_json::to_value(st).unwrap_or_default()),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("POST", "/v2/git/stage") => {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let paths: Vec<String> = body_json
+                        .get("paths")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| arr.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+                        .unwrap_or_default();
+                    match git.stage(&paths).await {
+                        Ok(_) => (200, serde_json::json!({ "success": true })),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("POST", "/v2/git/unstage") => {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let paths: Vec<String> = body_json
+                        .get("paths")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| arr.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+                        .unwrap_or_default();
+                    match git.unstage(&paths).await {
+                        Ok(_) => (200, serde_json::json!({ "success": true })),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("POST", "/v2/git/commit") => {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let message = body_json.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                    let stage_all = body_json.get("stage_all").and_then(|v| v.as_bool()).unwrap_or(false);
+                    match git.commit(message, stage_all).await {
+                        Ok(res) => (200, serde_json::to_value(res).unwrap_or_default()),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("POST", "/v2/git/push") => {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let remote = body_json.get("remote").and_then(|v| v.as_str());
+                    let branch = body_json.get("branch").and_then(|v| v.as_str());
+                    match git.push(remote, branch).await {
+                        Ok(out) => (200, serde_json::json!({ "output": out })),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("GET", "/v2/git/branches") => {
+                    match git.branches().await {
+                        Ok(branches) => (200, serde_json::json!({ "branches": branches })),
+                        Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                    }
+                }
+                ("POST", "/v2/git/checkout") | ("POST", "/v2/git/branch/checkout") => {
+                    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+                    let branch = body_json.get("branch").and_then(|v| v.as_str()).unwrap_or("");
+                    if branch.is_empty() {
+                        (400, serde_json::json!({ "error": "branch is required" }))
+                    } else {
+                        match git.checkout(branch).await {
+                            Ok(out) => (200, serde_json::json!({ "status": "ok", "output": out })),
+                            Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
+                        }
+                    }
+                }
+                ("GET", "/v2/git/log") | ("GET", "/v2/git/graph") => {
+                    match git.log_graph(30).await {
+                        Ok(commits) => (200, serde_json::json!({ "commits": commits })),
                         Err(e) => (500, serde_json::json!({ "error": e.to_string() })),
                     }
                 }

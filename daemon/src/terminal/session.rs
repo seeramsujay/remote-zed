@@ -36,6 +36,8 @@ pub struct FsListResult {
     pub current_path: String,
     pub parent_path: Option<String>,
     pub entries: Vec<FileEntry>,
+    #[serde(default)]
+    pub items: Vec<FileEntry>,
 }
 
 /// Interactive terminal and file management supervisor.
@@ -59,10 +61,17 @@ impl TerminalManager {
         self.cwd.read().await.to_string_lossy().to_string()
     }
 
-    /// Sets the active directory, resolving relative paths.
+    /// Sets the active directory, resolving relative paths and home tildes.
     pub async fn set_cwd(&self, target: &Path) -> Result<String> {
         let current = self.cwd.read().await.clone();
-        let candidate = if target.is_relative() {
+        let target_str = target.to_string_lossy();
+        let candidate = if target_str.starts_with('~') {
+            if let Ok(home) = std::env::var("HOME") {
+                PathBuf::from(target_str.replacen('~', &home, 1))
+            } else {
+                target.to_path_buf()
+            }
+        } else if target.is_relative() {
             current.join(target)
         } else {
             target.to_path_buf()
@@ -164,11 +173,22 @@ impl TerminalManager {
     pub async fn list_directory(&self, path_opt: Option<&str>) -> Result<FsListResult> {
         let current_cwd = self.cwd.read().await.clone();
         let target_path = if let Some(p) = path_opt {
-            let p_path = Path::new(p);
-            if p_path.is_relative() {
-                current_cwd.join(p_path)
+            let p_trimmed = p.trim();
+            if p_trimmed.is_empty() {
+                current_cwd
+            } else if p_trimmed.starts_with('~') {
+                if let Ok(home) = std::env::var("HOME") {
+                    PathBuf::from(p_trimmed.replacen('~', &home, 1))
+                } else {
+                    PathBuf::from(p_trimmed)
+                }
             } else {
-                p_path.to_path_buf()
+                let p_path = Path::new(p_trimmed);
+                if p_path.is_relative() {
+                    current_cwd.join(p_path)
+                } else {
+                    p_path.to_path_buf()
+                }
             }
         } else {
             current_cwd
@@ -219,6 +239,7 @@ impl TerminalManager {
         Ok(FsListResult {
             current_path: canonical.to_string_lossy().to_string(),
             parent_path: parent,
+            items: entries.clone(),
             entries,
         })
     }

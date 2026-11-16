@@ -147,6 +147,7 @@ if [[ ":$PATH:" != *":${HOME}/.local/bin:"* ]]; then
         SHELL_RC="${HOME}/.bashrc"
     fi
     if [[ -n "$SHELL_RC" ]] && [[ -f "$SHELL_RC" ]]; then
+        # shellcheck disable=SC2016
         if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' "$SHELL_RC"; then
             echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_RC"
         fi

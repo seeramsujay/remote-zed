@@ -30,8 +30,10 @@ except ImportError:
 
 try:
     import qrcode
+    from qrcode import constants as qr_constants
 except ImportError:
     qrcode = None
+    qr_constants = None
 
 CONFIG_DIR = Path.home() / ".zed-remote"
 CONFIG_FILE = CONFIG_DIR / "bunker.json"
@@ -98,7 +100,7 @@ def decrypt_payload(key_hex: str, b64_ciphertext: str) -> dict:
 
 def render_terminal_qr(pairing_uri: str):
     """Renders an ASCII QR code directly into the terminal."""
-    if qrcode is None:
+    if qrcode is None or qr_constants is None:
         print(
             "\n[!] Python 'qrcode' module not installed. Install with: pip install qrcode"
         )
@@ -107,7 +109,7 @@ def render_terminal_qr(pairing_uri: str):
 
     qr = qrcode.QRCode(
         version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        error_correction=qr_constants.ERROR_CORRECT_L,
         box_size=1,
         border=2,
     )
@@ -218,9 +220,6 @@ def cmd_run(args):
         )
         subprocess.run(["pkill", "-f", "free.pinggy.io"], capture_output=True)
 
-        with open(log_file, "w") as f:
-            pass
-
         ssh_cmd = [
             "ssh",
             "-p",
@@ -286,7 +285,12 @@ def cmd_run(args):
         try:
             time.sleep(rotation_interval_seconds)
         except KeyboardInterrupt:
+            if proc.poll() is None:
+                proc.terminate()
             break
+        finally:
+            if proc.poll() is None:
+                proc.terminate()
 
 
 def cmd_test_crypto(args):

@@ -14,6 +14,7 @@ MANIFEST_PATH = os.path.join(ROOT, "app", "android", "app", "src", "main", "Andr
 GRADLE_PATH = os.path.join(ROOT, "app", "android", "app", "build.gradle")
 GRADLE_KTS_PATH = os.path.join(ROOT, "app", "android", "app", "build.gradle.kts")
 
+
 def main():
     # 1. Copy release keystore
     if os.path.exists(SRC_KEYSTORE):
@@ -108,6 +109,7 @@ def main():
         with open(target_gradle, "w", encoding="utf-8") as f:
             f.write(gcontent)
         print(f"Configured release signing in {target_gradle}")
+
 
 if __name__ == "__main__":
     main()
