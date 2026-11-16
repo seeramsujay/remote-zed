@@ -55,4 +55,37 @@ class BunkerTunnelTest {
 
         assertEquals(plaintext, decrypted)
     }
+
+    @Test
+    fun `resolveTunnelUrl skips plaintext notification lines in federation history`() {
+        val keyBytes = ByteArray(32) { it.toByte() }
+        val base64Key = Base64.getEncoder().encodeToString(keyBytes)
+        val plaintext = "tcp://kdtgg-202-164-151-178.run.pinggy-free.link:38883"
+        val encrypted = BunkerTunnel.encryptAesGcm(plaintext, keyBytes)
+
+        val rawBody = """
+            Turn completed on remote-zed
+            AntiGravity Task Finished
+            $encrypted
+            Turn completed on remote-zed
+            test
+        """.trimIndent()
+
+        val lines = rawBody.lines().map { it.trim() }.filter { it.isNotBlank() }.reversed()
+        var resolvedUrl: String? = null
+        for (candidate in lines) {
+            try {
+                val decrypted = BunkerTunnel.decryptAesGcm(candidate, base64Key)
+                if (decrypted.startsWith("tcp://") || decrypted.startsWith("http://") || decrypted.startsWith("https://") || decrypted.contains(":")) {
+                    resolvedUrl = BunkerTunnel.normalizeOrigin(decrypted, 8443)
+                    break
+                }
+            } catch (_: Exception) {
+                // Skip invalid payload
+            }
+        }
+
+        assertNotNull(resolvedUrl)
+        assertEquals("http://kdtgg-202-164-151-178.run.pinggy-free.link:38883", resolvedUrl)
+    }
 }
