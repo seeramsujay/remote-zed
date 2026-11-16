@@ -136,6 +136,7 @@ zed-tunnel --update           # Update Zed Remote to latest release
 
 ---
 
+<a id="mobile-app-setup-android--ios"></a>
 ### 📱 Mobile App Setup (Android & iOS)
 
 Choose the client that fits your workflow:
@@ -149,6 +150,7 @@ Choose the client that fits your workflow:
 
 ---
 
+<a id="bunker-tunnel--firewall-bypass"></a>
 ## 🏰 Bunker Tunnel & Firewall Bypass
 
 Standard mesh overlays like Tailscale or WireGuard use UDP (port 41641), which enterprise networks, university hostels, and Fortinet egress firewalls routinely block or throttle via Deep Packet Inspection (DPI).
@@ -185,6 +187,7 @@ Symlinks the extension at `extensions/zed-remote` into Zed's dev extension path:
 
 ---
 
+<a id="releases--cloud-builds"></a>
 ## 📦 Releases & Cloud Builds
 
 You don't need to heat up your laptop compiling APKs or IPAs. GitHub Actions automatically builds and publishes releases on GitHub's cloud runners for free:

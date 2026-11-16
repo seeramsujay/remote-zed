@@ -30,13 +30,13 @@ class V2PairingRepositoryTest {
         server.enqueue(
             MockResponse()
                 .setResponseCode(200)
-                .setBody("""{"device_id":"device-123","credential":"credential-ABC_123"}"""),
+                .setBody("""{"device_id":"device-123","credential":"credential-ABC_123"}"""), // gitleaks:allow
         )
         val origin = "http://127.0.0.1:${server.port}"
         val ticket = PairingTicket(
             origin = origin,
             ticketId = "ticket-123",
-            secret = "secret-ABC_123",
+            secret = "secret-ABC_123", // gitleaks:allow
         )
         val repository = V2PairingRepository(origin, debug = false, client = OkHttpClient())
 
