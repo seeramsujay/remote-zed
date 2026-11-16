@@ -3,7 +3,7 @@
 use crate::error::Result;
 use crate::gateway::auth::AuthValidator;
 use crate::git::GitEngine;
-use crate::protocol::{error_codes, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse, RequestId};
+use crate::protocol::{error_codes, JsonRpcMessage, JsonRpcRequest, JsonRpcResponse};
 use crate::proxy::MessageRouter;
 use crate::security::SecurityGuard;
 use crate::session::SessionManager;
@@ -198,7 +198,7 @@ impl WebSocketGateway {
 
     /// Performs the WebSocket handshake with authentication verification, then services client messages.
     async fn handle_connection(
-        mut stream: TcpStream,
+        stream: TcpStream,
         peer_addr: SocketAddr,
         auth: AuthValidator,
         router: MessageRouter,
@@ -615,7 +615,7 @@ impl WebSocketGateway {
         }
 
         // Ensure full body is read if Content-Length header is present
-        let mut initial_req = String::from_utf8_lossy(&buffer[..bytes_read]);
+        let initial_req = String::from_utf8_lossy(&buffer[..bytes_read]);
         let mut content_length = 0usize;
         for line in initial_req.lines() {
             if line.to_lowercase().starts_with("content-length:") {

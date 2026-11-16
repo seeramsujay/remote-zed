@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::fs::{create_dir_all, read_dir};
 use tokio::process::Command;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// File entry returned when browsing directories.
 #[derive(Debug, Clone, Serialize, Deserialize)]

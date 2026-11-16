@@ -6,7 +6,7 @@ use crate::security::SecurityGuard;
 use crate::session::{MessageDirection, SessionManager};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
@@ -310,7 +310,8 @@ impl MessageRouter {
                             .cloned()
                             .unwrap_or(serde_json::Value::Null);
 
-                        let options: Vec<serde_json::Value> = params
+                        let options: Vec<serde_json::Value> = req
+                            .params
                             .get("options")
                             .and_then(|o| o.as_array())
                             .cloned()

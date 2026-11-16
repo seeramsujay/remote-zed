@@ -4,7 +4,7 @@ use crate::error::{DaemonError, Result};
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::info;
 
 /// System telemetry report sent to mobile client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
