@@ -22,8 +22,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cryptography.hazmat.primitives.ciphers.aead import (
-    AESGCM,  # pylint: disable=import-error
+from cryptography.hazmat.primitives.ciphers.aead import (  # pylint: disable=import-error
+    AESGCM,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
