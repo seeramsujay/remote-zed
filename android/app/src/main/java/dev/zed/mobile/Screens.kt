@@ -576,6 +576,7 @@ internal fun HomeScreen(state: MobileState, vm: ZedViewModel) {
 internal fun WorkspaceScreen(project: Project, state: MobileState, vm: ZedViewModel) {
     val projectThreads = state.projectThreads[project.id].orEmpty()
     val projectRecents = state.recents.filter { it.project.id == project.id }
+    var threadSearchQuery by remember { mutableStateOf("") }
 
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 4.dp, bottom = 120.dp)) {
         // Top Navigation Bar
@@ -644,7 +645,52 @@ internal fun WorkspaceScreen(project: Project, state: MobileState, vm: ZedViewMo
             }
         }
 
-        if (projectThreads.isEmpty() && projectRecents.isEmpty()) {
+        val allThreads = if (projectThreads.isNotEmpty()) projectThreads else projectRecents.map { it.thread }
+        val filteredThreads = if (threadSearchQuery.isBlank()) {
+            allThreads
+        } else {
+            allThreads.filter { it.title.contains(threadSearchQuery, ignoreCase = true) }
+        }
+
+        if (allThreads.size > 2 || threadSearchQuery.isNotEmpty()) {
+            item(key = "threads-search") {
+                Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) {
+                    OutlinedTextField(
+                        value = threadSearchQuery,
+                        onValueChange = { threadSearchQuery = it },
+                        placeholder = { Text("Search conversations…", color = Color(0xFF6B6B7C), style = MaterialTheme.typography.bodyMedium) },
+                        singleLine = true,
+                        leadingIcon = {
+                            Icon(Symbols.Search, contentDescription = "Search", tint = Color(0xFF9E9EAC), modifier = Modifier.size(18.dp))
+                        },
+                        trailingIcon = {
+                            if (threadSearchQuery.isNotEmpty()) {
+                                Icon(
+                                    Symbols.Close,
+                                    contentDescription = "Clear",
+                                    tint = Color(0xFF9E9EAC),
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .clickable { threadSearchQuery = "" },
+                                )
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color(0xFFF3F3F7),
+                            unfocusedTextColor = Color(0xFFF3F3F7),
+                            focusedContainerColor = Color(0xFF16161E),
+                            unfocusedContainerColor = Color(0xFF16161E),
+                            focusedBorderColor = Color(0xFFA58DFE),
+                            unfocusedBorderColor = Color(0xFF262634),
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                    )
+                }
+            }
+        }
+
+        if (allThreads.isEmpty()) {
             item(key = "no-threads") {
                 Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
                     Surface(
@@ -665,9 +711,14 @@ internal fun WorkspaceScreen(project: Project, state: MobileState, vm: ZedViewMo
                     }
                 }
             }
+        } else if (filteredThreads.isEmpty()) {
+            item(key = "no-search-results") {
+                Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text("No conversations match \"$threadSearchQuery\"", style = MaterialTheme.typography.bodyMedium, color = ZedColors.Muted)
+                }
+            }
         } else {
-            val allThreads = if (projectThreads.isNotEmpty()) projectThreads else projectRecents.map { it.thread }
-            items(allThreads, key = { it.id }) { thread ->
+            items(filteredThreads, key = { it.id }) { thread ->
                 Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
                     Surface(
                         color = Color(0xFF16161E),

@@ -41,11 +41,32 @@ impl SessionLogger {
         create_dir_all(base_dir).await?;
         let file_path = base_dir.join(format!("{}.jsonl", session_id));
 
-        // Calculate initial sequence number by counting existing lines if file exists
+        // Calculate initial sequence number by inspecting the tail if file exists
         let mut initial_seq = 0;
         if file_path.exists() {
-            if let Ok(content) = tokio::fs::read_to_string(&file_path).await {
-                initial_seq = content.lines().count() as u64;
+            if let Ok(metadata) = tokio::fs::metadata(&file_path).await {
+                let file_len = metadata.len();
+                if file_len > 0 {
+                    let seek_pos = file_len.saturating_sub(8192);
+                    if let Ok(mut file) = tokio::fs::File::open(&file_path).await {
+                        use tokio::io::{AsyncBufReadExt, AsyncSeekExt};
+                        let _ = file.seek(std::io::SeekFrom::Start(seek_pos)).await;
+                        let mut reader = tokio::io::BufReader::new(file).lines();
+                        if seek_pos > 0 {
+                            let _ = reader.next_line().await; // discard partial line
+                        }
+                        while let Ok(Some(line)) = reader.next_line().await {
+                            let trimmed = line.trim();
+                            if !trimmed.is_empty() {
+                                if let Ok(entry) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                                    if let Some(s) = entry.get("seq").and_then(|v| v.as_u64()) {
+                                        initial_seq = s;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
