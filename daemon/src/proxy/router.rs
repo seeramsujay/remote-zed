@@ -385,6 +385,10 @@ impl MessageRouter {
 
         debug!("Agent -> Proxy: {}", trimmed);
 
+        // Responses to prompts that originated on mobile ("mobile-<uuid>") have no matching
+        // request on Zed's side, so they must never be forwarded to Zed's stdout.
+        let mut suppress_zed_mirror = false;
+
         if let Ok(msg) = JsonRpcMessage::parse(trimmed) {
             match &msg {
                 JsonRpcMessage::Notification(notif) => {
@@ -581,6 +585,13 @@ impl MessageRouter {
                     }
                     drop(pending);
 
+                    if id_str.starts_with("mobile-") {
+                        suppress_zed_mirror = true;
+                        if trimmed.contains("\"error\"") {
+                            warn!("Agent rejected mobile-originated prompt {}: {}", id_str, trimmed);
+                        }
+                    }
+
                     // Releasing prompt lock on tracked session and notifying mobile of turn completion
                     let target_session_id = {
                         let mut p = self.pending_prompt_sessions.lock().await;
@@ -611,8 +622,10 @@ impl MessageRouter {
         }
 
         // Mirror to Zed stdout
-        if let Err(e) = self.zed_stdout_tx.send(format_ndjson_line(trimmed)).await {
-            error!("Failed to forward agent output to Zed stdout: {}", e);
+        if !suppress_zed_mirror {
+            if let Err(e) = self.zed_stdout_tx.send(format_ndjson_line(trimmed)).await {
+                error!("Failed to forward agent output to Zed stdout: {}", e);
+            }
         }
 
         // Broadcast to mobile clients
