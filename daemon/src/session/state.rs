@@ -157,11 +157,8 @@ impl SessionManager {
     }
 
     /// Parses a session `.jsonl` file in a single streaming pass into chat messages and rich transcript.
-    pub async fn parse_session_file(path: &std::path::Path) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
-        let file = match tokio::fs::File::open(path).await {
-            Ok(f) => f,
-            Err(_) => return (Vec::new(), Vec::new()),
-        };
+    pub async fn parse_session_file(path: &std::path::Path) -> std::io::Result<(Vec<serde_json::Value>, Vec<serde_json::Value>)> {
+        let file = tokio::fs::File::open(path).await?;
 
         let mut messages = Vec::new();
         let mut transcript = Vec::new();
@@ -382,7 +379,7 @@ impl SessionManager {
         flush_thought(&mut transcript, &mut current_thought_chunks);
         flush_assistant(&mut transcript, &mut messages, &mut current_assistant_chunks);
 
-        (messages, transcript)
+        Ok((messages, transcript))
     }
 
     /// Retrieves parsed messages and transcript with fast in-memory caching.
@@ -409,14 +406,24 @@ impl SessionManager {
             }
         }
 
-        let (messages, transcript) = Self::parse_session_file(&file_path).await;
-        *cache_guard = Some(SessionCache {
-            file_len: current_len,
-            messages: messages.clone(),
-            transcript: transcript.clone(),
-        });
-
-        (messages, transcript)
+        match Self::parse_session_file(&file_path).await {
+            Ok((messages, transcript)) => {
+                *cache_guard = Some(SessionCache {
+                    file_len: current_len,
+                    messages: messages.clone(),
+                    transcript: transcript.clone(),
+                });
+                (messages, transcript)
+            }
+            Err(e) => {
+                warn!("Failed to parse session file {:?}: {}", file_path, e);
+                if let Some(ref cache) = *cache_guard {
+                    (cache.messages.clone(), cache.transcript.clone())
+                } else {
+                    (Vec::new(), Vec::new())
+                }
+            }
+        }
     }
 
     /// Extracts structured chat messages ({ "role": "user" | "assistant", "text": "..." }) from the latest or specified session log.

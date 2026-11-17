@@ -840,13 +840,6 @@ impl WebSocketGateway {
             if path == "/v2/projects/catalog" || path == "/v2/projects" {
                 let cwd = terminal.get_cwd().await;
                 let projects = discover_workspaces(&cwd).await;
-                for p in &projects {
-                    if p.get("is_active_window").and_then(|v| v.as_bool()).unwrap_or(false) {
-                        if let Some(sid) = p.get("active_session_id").and_then(|s| s.as_str()) {
-                            router.set_active_session_id(sid).await;
-                        }
-                    }
-                }
                 (200, serde_json::json!({ "projects": projects }))
             } else if (path == "/v2/projects/open" || path == "/v2/workspaces/open" || (path.starts_with("/v2/projects/") && path.ends_with("/open"))) && method == "POST" {
                 let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();

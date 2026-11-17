@@ -649,7 +649,10 @@ internal fun WorkspaceScreen(project: Project, state: MobileState, vm: ZedViewMo
         val filteredThreads = if (threadSearchQuery.isBlank()) {
             allThreads
         } else {
-            allThreads.filter { it.title.contains(threadSearchQuery, ignoreCase = true) }
+            allThreads.filter {
+                it.title.ifBlank { "Conversation" }
+                    .contains(threadSearchQuery, ignoreCase = true)
+            }
         }
 
         if (allThreads.size > 2 || threadSearchQuery.isNotEmpty()) {
