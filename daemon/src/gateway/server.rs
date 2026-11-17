@@ -1275,7 +1275,7 @@ impl WebSocketGateway {
                     .copied()
                     .unwrap_or("main-thread");
 
-                let cancel_session_id = if req_thread_id == "main-thread" {
+                let cancel_session_id = if req_thread_id == "main-thread" || req_thread_id == "default" {
                     router.get_active_session_id().await.unwrap_or_else(|| "default".to_string())
                 } else {
                     req_thread_id.to_string()
@@ -1370,7 +1370,7 @@ impl WebSocketGateway {
                 let approvals = router.get_pending_approvals().await;
                 let state = thread_state.lock().await;
 
-                let (resolved_id, title, agent_id, agent_name, cached_msgs, cached_transcript) = if thread_id == "main-thread" {
+                let (resolved_id, title, agent_id, agent_name, cached_msgs, cached_transcript) = if thread_id == "main-thread" || thread_id == "default" {
                     let active = router.get_active_session_id().await;
                     (active, "AntiGravity AI Workspace".to_string(), "antigravity".to_string(), "AntiGravity Agent".to_string(), state.messages.clone(), state.transcript.clone())
                 } else if let Some(ct) = state.custom_threads.iter().find(|t| t.id == thread_id) {

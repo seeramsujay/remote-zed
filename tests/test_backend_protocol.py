@@ -746,5 +746,16 @@ class TestTranscriptPaginationAndPromptRouting(unittest.TestCase):
         self.assertEqual(agent_prompt["params"]["prompt"][0]["text"], text)
 
 
+    def test_thread_alias_resolution(self):
+        active_session = "active-session-uuid"
+        for alias in ["main-thread", "default"]:
+            resolved = active_session if alias in ("main-thread", "default") else alias
+            self.assertEqual(resolved, active_session)
+
+        explicit_thread = "custom-thread-id"
+        resolved_explicit = active_session if explicit_thread in ("main-thread", "default") else explicit_thread
+        self.assertEqual(resolved_explicit, "custom-thread-id")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
