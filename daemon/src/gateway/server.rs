@@ -1224,11 +1224,31 @@ impl WebSocketGateway {
                         }).to_string();
                         let _ = router.mobile_broadcast_tx.send(notif);
                     } else {
-                        let prompt_session_id = if req_thread_id == "main-thread" {
+                        let prompt_session_id = if req_thread_id == "main-thread" || req_thread_id == "default" {
                             router.get_active_session_id().await.unwrap_or_else(|| "default".to_string())
                         } else {
                             req_thread_id.to_string()
                         };
+
+                        // Mirror user message notification to Zed stdout so desktop renders the chunk immediately
+                        let zed_user_update = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "method": "session/update",
+                            "params": {
+                                "sessionId": prompt_session_id,
+                                "update": {
+                                    "sessionUpdate": "agent_message_chunk",
+                                    "sessionUpdateType": "agent_message_chunk",
+                                    "content": {
+                                        "type": "text",
+                                        "text": format!("\n\n📱 **[Mobile]**: {}\n\n", text)
+                                    }
+                                }
+                            }
+                        }).to_string();
+                        let _ = router.send_to_zed_stdout(&zed_user_update).await;
+                        let _ = router.mobile_broadcast_tx.send(zed_user_update);
+
                         let prompt_rpc = serde_json::json!({
                             "jsonrpc": "2.0",
                             "id": format!("mobile-{}", uuid::Uuid::new_v4()),
@@ -1243,24 +1263,6 @@ impl WebSocketGateway {
                         }).to_string();
 
                         let _ = router.handle_mobile_message(&prompt_rpc).await;
-
-                        // Mirror user message notification to Zed stdout so desktop renders the chunk immediately
-                        let zed_user_update = serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "method": "session/update",
-                            "params": {
-                                "sessionId": prompt_session_id,
-                                "update": {
-                                    "sessionUpdate": "user_message_chunk",
-                                    "content": {
-                                        "type": "text",
-                                        "text": text
-                                    }
-                                }
-                            }
-                        }).to_string();
-                        let _ = router.send_to_zed_stdout(&zed_user_update).await;
-                        let _ = router.mobile_broadcast_tx.send(zed_user_update);
                     }
                 }
                 (200, serde_json::json!({
@@ -1273,7 +1275,7 @@ impl WebSocketGateway {
                     .copied()
                     .unwrap_or("main-thread");
 
-                let cancel_session_id = if req_thread_id == "main-thread" {
+                let cancel_session_id = if req_thread_id == "main-thread" || req_thread_id == "default" {
                     router.get_active_session_id().await.unwrap_or_else(|| "default".to_string())
                 } else {
                     req_thread_id.to_string()
@@ -1321,12 +1323,54 @@ impl WebSocketGateway {
                 (200, serde_json::json!({
                     "accepted": true
                 }))
+            } else if path.contains("/threads/") && path.ends_with("/transcript") && method == "GET" {
+                let parts: Vec<&str> = path.split('/').collect();
+                let thread_id = parts.iter().position(|&p| p == "threads")
+                    .and_then(|idx| parts.get(idx + 1))
+                    .copied()
+                    .unwrap_or("main-thread");
+
+                let resolved_id = if thread_id == "main-thread" || thread_id == "default" {
+                    router.get_active_session_id().await
+                } else {
+                    Some(thread_id.to_string())
+                };
+
+                let (_, all_transcript) = session_manager.get_session_data(resolved_id.as_deref()).await;
+                let total = all_transcript.len();
+
+                let before_idx: usize = query
+                    .split('&')
+                    .find_map(|p| p.strip_prefix("before="))
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(total);
+
+                let limit: usize = query
+                    .split('&')
+                    .find_map(|p| p.strip_prefix("limit="))
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(50)
+                    .min(200);
+
+                let end = before_idx.min(total);
+                let start = end.saturating_sub(limit);
+                let entries = if start < end && end <= total {
+                    all_transcript[start..end].to_vec()
+                } else {
+                    Vec::new()
+                };
+                let omitted_entries = start;
+
+                (200, serde_json::json!({
+                    "entries": entries,
+                    "omitted_entries": omitted_entries
+                }))
             } else if (path.starts_with("/v2/threads/") || path.starts_with("/threads/")) && method == "GET" {
                 let thread_id = path.rsplit('/').next().unwrap_or("main-thread");
                 let approvals = router.get_pending_approvals().await;
                 let state = thread_state.lock().await;
 
-                let (resolved_id, title, agent_id, agent_name, cached_msgs, cached_transcript) = if thread_id == "main-thread" {
+                let (resolved_id, title, agent_id, agent_name, cached_msgs, cached_transcript) = if thread_id == "main-thread" || thread_id == "default" {
                     let active = router.get_active_session_id().await;
                     (active, "AntiGravity AI Workspace".to_string(), "antigravity".to_string(), "AntiGravity Agent".to_string(), state.messages.clone(), state.transcript.clone())
                 } else if let Some(ct) = state.custom_threads.iter().find(|t| t.id == thread_id) {
@@ -1339,9 +1383,8 @@ impl WebSocketGateway {
                 };
                 drop(state);
 
-                // Recover chat messages & transcript from the disk session logs
-                let mut messages = session_manager.get_chat_messages(resolved_id.as_deref()).await;
-                let mut transcript = session_manager.get_chat_transcript(resolved_id.as_deref()).await;
+                // Recover chat messages & transcript from the disk session logs via fast cache
+                let (mut messages, mut transcript) = session_manager.get_session_data(resolved_id.as_deref()).await;
 
                 if messages.is_empty() && !cached_msgs.is_empty() {
                     messages = cached_msgs;
@@ -1349,6 +1392,26 @@ impl WebSocketGateway {
                 if transcript.is_empty() && !cached_transcript.is_empty() {
                     transcript = cached_transcript;
                 }
+
+                // Window transcript and messages to last 50 entries to prevent mobile OOM crash
+                let total_transcript = transcript.len();
+                let transcript_page_size = 50;
+                let (transcript_slice, transcript_omitted) = if total_transcript > transcript_page_size {
+                    (
+                        transcript[total_transcript - transcript_page_size..].to_vec(),
+                        total_transcript - transcript_page_size,
+                    )
+                } else {
+                    (transcript, 0)
+                };
+
+                let total_messages = messages.len();
+                let messages_page_size = 50;
+                let messages_slice = if total_messages > messages_page_size {
+                    messages[total_messages - messages_page_size..].to_vec()
+                } else {
+                    messages
+                };
 
                 let is_busy = if let Some(ref sid) = resolved_id {
                     session_manager.is_session_busy(sid).await
@@ -1366,9 +1429,9 @@ impl WebSocketGateway {
                         "name": agent_name,
                         "is_native": false
                     },
-                    "messages": messages,
-                    "transcript": transcript,
-                    "transcript_omitted_entries": 0,
+                    "messages": messages_slice,
+                    "transcript": transcript_slice,
+                    "transcript_omitted_entries": transcript_omitted,
                     "approvals": approvals
                 }))
             } else {

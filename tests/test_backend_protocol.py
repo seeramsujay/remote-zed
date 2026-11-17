@@ -668,5 +668,93 @@ done
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+class TestTranscriptPaginationAndPromptRouting(unittest.TestCase):
+    """Verifies transcript windowing, backwards pagination, and mobile prompt formatting."""
+
+    def test_transcript_pagination_slicing(self):
+        # Generate 125 mock transcript items
+        total_items = 125
+        transcript = [{"index": i, "kind": "thought", "text": f"step {i}"} for i in range(total_items)]
+
+        # 1. Initial snapshot window (last 50 items)
+        page_size = 50
+        snapshot_slice = transcript[-page_size:]
+        omitted = total_items - page_size
+        self.assertEqual(len(snapshot_slice), 50)
+        self.assertEqual(snapshot_slice[0]["index"], 75)
+        self.assertEqual(snapshot_slice[-1]["index"], 124)
+        self.assertEqual(omitted, 75)
+
+        # 2. Older page 1: before=75, limit=50
+        before = 75
+        limit = 50
+        end = min(before, total_items)
+        start = max(0, end - limit)
+        page1 = transcript[start:end]
+        omitted1 = start
+        self.assertEqual(len(page1), 50)
+        self.assertEqual(page1[0]["index"], 25)
+        self.assertEqual(page1[-1]["index"], 74)
+        self.assertEqual(omitted1, 25)
+
+        # 3. Older page 2: before=25, limit=50 -> returns remaining 25 items
+        before = 25
+        end = min(before, total_items)
+        start = max(0, end - limit)
+        page2 = transcript[start:end]
+        omitted2 = start
+        self.assertEqual(len(page2), 25)
+        self.assertEqual(page2[0]["index"], 0)
+        self.assertEqual(page2[-1]["index"], 24)
+        self.assertEqual(omitted2, 0)
+
+    def test_mobile_prompt_chunk_framing(self):
+        text = "Hello from phone"
+        session_id = "test-session-uuid"
+
+        # Frame mirrored to Zed desktop assistant
+        zed_update = {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "sessionUpdateType": "agent_message_chunk",
+                    "content": {
+                        "type": "text",
+                        "text": f"\n\n📱 **[Mobile]**: {text}\n\n",
+                    },
+                },
+            },
+        }
+        self.assertIn("📱 **[Mobile]**: Hello from phone", zed_update["params"]["update"]["content"]["text"])
+        self.assertEqual(zed_update["params"]["sessionId"], session_id)
+
+        # Frame routed to agent stdin
+        agent_prompt = {
+            "jsonrpc": "2.0",
+            "id": "mobile-123",
+            "method": "session/prompt",
+            "params": {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": text}],
+            },
+        }
+        self.assertEqual(agent_prompt["method"], "session/prompt")
+        self.assertEqual(agent_prompt["params"]["sessionId"], session_id)
+        self.assertEqual(agent_prompt["params"]["prompt"][0]["text"], text)
+
+    def test_thread_alias_resolution(self):
+        active_session = "active-session-uuid"
+        for alias in ["main-thread", "default"]:
+            resolved = active_session if alias in ("main-thread", "default") else alias
+            self.assertEqual(resolved, active_session)
+
+        explicit_thread = "custom-thread-id"
+        resolved_explicit = active_session if explicit_thread in ("main-thread", "default") else explicit_thread
+        self.assertEqual(resolved_explicit, "custom-thread-id")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -5,8 +5,17 @@ use crate::session::logger::{MessageDirection, SessionLogEntry, SessionLogger};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::io::AsyncBufReadExt;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
+
+/// Parsed in-memory cache of session transactions.
+#[derive(Clone, Default)]
+pub struct SessionCache {
+    pub file_len: u64,
+    pub messages: Vec<serde_json::Value>,
+    pub transcript: Vec<serde_json::Value>,
+}
 
 /// Tracks the active execution state of a specific session.
 pub struct SessionEntry {
@@ -14,6 +23,8 @@ pub struct SessionEntry {
     pub logger: Arc<SessionLogger>,
     /// Mutex held while a prompt turn is in flight. Tracks the instant the lock was acquired.
     pub busy_since: Mutex<Option<std::time::Instant>>,
+    /// In-memory cache for fast, zero-copy thread polling.
+    pub cache: Mutex<Option<SessionCache>>,
 }
 
 /// Global session repository managing all active conversation threads.
@@ -50,6 +61,7 @@ impl SessionManager {
             session_id: session_id.to_string(),
             logger: Arc::new(logger),
             busy_since: Mutex::new(None),
+            cache: Mutex::new(None),
         });
 
         write_guard.insert(session_id.to_string(), Arc::clone(&entry));
@@ -115,139 +127,15 @@ impl SessionManager {
         entry.logger.read_events_from(from_seq).await
     }
 
-    /// Extracts structured chat messages ({ "role": "user" | "assistant", "text": "..." }) from the latest or specified session log.
-    pub async fn get_chat_messages(&self, preferred_session_id: Option<&str>) -> Vec<serde_json::Value> {
-        let file_to_read = if let Some(id) = preferred_session_id {
+    /// Resolves the session ID and file path for a requested or latest session.
+    pub async fn resolve_session_file(&self, preferred_session_id: Option<&str>) -> Option<(String, PathBuf)> {
+        if let Some(id) = preferred_session_id {
             let p = self.base_dir.join(format!("{}.jsonl", id));
             if p.exists() {
-                Some(p)
-            } else {
-                return Vec::new();
-            }
-        } else {
-            let mut latest_file: Option<(PathBuf, std::time::SystemTime)> = None;
-            if let Ok(mut dir_entries) = tokio::fs::read_dir(&self.base_dir).await {
-                while let Ok(Some(entry)) = dir_entries.next_entry().await {
-                    let path = entry.path();
-                    if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                        if let Ok(metadata) = entry.metadata().await {
-                            let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                            if latest_file.as_ref().map_or(true, |(_, m)| modified > *m) {
-                                latest_file = Some((path, modified));
-                            }
-                        }
-                    }
-                }
-            }
-            latest_file.map(|(p, _)| p)
-        };
-
-        let path = match file_to_read {
-            Some(p) => p,
-            None => return Vec::new(),
-        };
-
-        let content = match tokio::fs::read_to_string(&path).await {
-            Ok(c) => c,
-            Err(_) => return Vec::new(),
-        };
-
-        let mut messages = Vec::new();
-        let mut current_assistant_chunks = Vec::new();
-
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let data: serde_json::Value = match serde_json::from_str(trimmed) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-
-            let frame = match data.get("frame") {
-                Some(f) => f,
-                None => continue,
-            };
-
-            let method = frame.get("method").and_then(|m| m.as_str()).unwrap_or("");
-            if method == "session/prompt" {
-                if !current_assistant_chunks.is_empty() {
-                    let text = current_assistant_chunks.join("");
-                    let clean = text.trim();
-                    if !clean.is_empty() {
-                        messages.push(serde_json::json!({
-                            "role": "assistant",
-                            "text": clean
-                        }));
-                    }
-                    current_assistant_chunks.clear();
-                }
-
-                let p = frame.get("params").and_then(|p| p.get("prompt"));
-                let user_text = if let Some(arr) = p.and_then(|p| p.as_array()) {
-                    let mut parts = Vec::new();
-                    for item in arr {
-                        if let Some(t) = item.get("text").and_then(|t| t.as_str()) {
-                            let trimmed = t.trim();
-                            if !trimmed.is_empty() {
-                                parts.push(trimmed);
-                            }
-                        }
-                    }
-                    parts.join("\n")
-                } else if let Some(s) = p.and_then(|p| p.as_str()) {
-                    s.to_string()
-                } else {
-                    String::new()
-                };
-
-                let clean_user = user_text.trim();
-                if !clean_user.is_empty() {
-                    messages.push(serde_json::json!({
-                        "role": "user",
-                        "text": clean_user
-                    }));
-                }
-            } else if method == "session/update" {
-                let update = match frame.get("params").and_then(|p| p.get("update")) {
-                    Some(u) => u,
-                    None => continue,
-                };
-                let t = update
-                    .get("sessionUpdate")
-                    .or_else(|| update.get("sessionUpdateType"))
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("");
-                if t == "agent_message_chunk" {
-                    if let Some(chunk_text) = update
-                        .get("content")
-                        .and_then(|c| c.get("text"))
-                        .and_then(|t| t.as_str())
-                    {
-                        current_assistant_chunks.push(chunk_text.to_string());
-                    }
-                }
+                return Some((id.to_string(), p));
             }
         }
-
-        if !current_assistant_chunks.is_empty() {
-            let text = current_assistant_chunks.join("");
-            let clean = text.trim();
-            if !clean.is_empty() {
-                messages.push(serde_json::json!({
-                    "role": "assistant",
-                    "text": clean
-                }));
-            }
-        }
-
-        messages
-    }
-
-    /// Returns the session ID of the most recently updated session log.
-    pub async fn get_latest_session_id(&self) -> Option<String> {
-        let mut latest: Option<(String, std::time::SystemTime)> = None;
+        let mut latest_file: Option<(String, PathBuf, std::time::SystemTime)> = None;
         if let Ok(mut dir_entries) = tokio::fs::read_dir(&self.base_dir).await {
             while let Ok(Some(entry)) = dir_entries.next_entry().await {
                 let path = entry.path();
@@ -258,53 +146,21 @@ impl SessionManager {
                     }
                     if let Ok(metadata) = entry.metadata().await {
                         let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                        if latest.as_ref().map_or(true, |(_, m)| modified > *m) {
-                            latest = Some((stem, modified));
+                        if latest_file.as_ref().map_or(true, |(_, _, m)| modified > *m) {
+                            latest_file = Some((stem, path, modified));
                         }
                     }
                 }
             }
         }
-        latest.map(|(id, _)| id)
+        latest_file.map(|(id, path, _)| (id, path))
     }
 
-    /// Extracts structured transcript entries from the session log suitable for mobile rich transcript rendering.
-    pub async fn get_chat_transcript(&self, preferred_session_id: Option<&str>) -> Vec<serde_json::Value> {
-        let file_to_read = if let Some(id) = preferred_session_id {
-            let p = self.base_dir.join(format!("{}.jsonl", id));
-            if p.exists() {
-                Some(p)
-            } else {
-                return Vec::new();
-            }
-        } else {
-            let mut latest_file: Option<(PathBuf, std::time::SystemTime)> = None;
-            if let Ok(mut dir_entries) = tokio::fs::read_dir(&self.base_dir).await {
-                while let Ok(Some(entry)) = dir_entries.next_entry().await {
-                    let path = entry.path();
-                    if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                        if let Ok(metadata) = entry.metadata().await {
-                            let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                            if latest_file.as_ref().map_or(true, |(_, m)| modified > *m) {
-                                latest_file = Some((path, modified));
-                            }
-                        }
-                    }
-                }
-            }
-            latest_file.map(|(p, _)| p)
-        };
+    /// Parses a session `.jsonl` file in a single streaming pass into chat messages and rich transcript.
+    pub async fn parse_session_file(path: &std::path::Path) -> std::io::Result<(Vec<serde_json::Value>, Vec<serde_json::Value>)> {
+        let file = tokio::fs::File::open(path).await?;
 
-        let path = match file_to_read {
-            Some(p) => p,
-            None => return Vec::new(),
-        };
-
-        let content = match tokio::fs::read_to_string(&path).await {
-            Ok(c) => c,
-            Err(_) => return Vec::new(),
-        };
-
+        let mut messages = Vec::new();
         let mut transcript = Vec::new();
         let mut current_thought_chunks: Vec<String> = Vec::new();
         let mut current_assistant_chunks: Vec<String> = Vec::new();
@@ -327,7 +183,7 @@ impl SessionManager {
             }
         };
 
-        let flush_assistant = |transcript: &mut Vec<serde_json::Value>, chunks: &mut Vec<String>| {
+        let flush_assistant = |transcript: &mut Vec<serde_json::Value>, messages: &mut Vec<serde_json::Value>, chunks: &mut Vec<String>| {
             if !chunks.is_empty() {
                 let text = chunks.join("");
                 let clean = text.trim();
@@ -340,12 +196,17 @@ impl SessionManager {
                         "chunks": [{ "kind": "text", "text": clean }],
                         "details_available": false
                     }));
+                    messages.push(serde_json::json!({
+                        "role": "assistant",
+                        "text": clean
+                    }));
                 }
                 chunks.clear();
             }
         };
 
-        for line in content.lines() {
+        let mut reader = tokio::io::BufReader::new(file).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
@@ -363,7 +224,7 @@ impl SessionManager {
             let method = frame.get("method").and_then(|m| m.as_str()).unwrap_or("");
             if method == "session/prompt" {
                 flush_thought(&mut transcript, &mut current_thought_chunks);
-                flush_assistant(&mut transcript, &mut current_assistant_chunks);
+                flush_assistant(&mut transcript, &mut messages, &mut current_assistant_chunks);
 
                 let p = frame.get("params").and_then(|p| p.get("prompt"));
                 let user_text = if let Some(arr) = p.and_then(|p| p.as_array()) {
@@ -393,6 +254,10 @@ impl SessionManager {
                         "chunks": [{ "kind": "text", "text": clean_user }],
                         "details_available": false
                     }));
+                    messages.push(serde_json::json!({
+                        "role": "user",
+                        "text": clean_user
+                    }));
                 }
             } else if method == "session/update" {
                 let update = match frame.get("params").and_then(|p| p.get("update")) {
@@ -406,7 +271,7 @@ impl SessionManager {
                     .unwrap_or("");
 
                 if t == "agent_thought_chunk" {
-                    flush_assistant(&mut transcript, &mut current_assistant_chunks);
+                    flush_assistant(&mut transcript, &mut messages, &mut current_assistant_chunks);
                     if let Some(chunk_text) = update
                         .get("content")
                         .and_then(|c| c.get("text"))
@@ -425,7 +290,7 @@ impl SessionManager {
                     }
                 } else if t == "tool_call" {
                     flush_thought(&mut transcript, &mut current_thought_chunks);
-                    flush_assistant(&mut transcript, &mut current_assistant_chunks);
+                    flush_assistant(&mut transcript, &mut messages, &mut current_assistant_chunks);
 
                     let tool_call_id = update
                         .get("toolCallId")
@@ -512,9 +377,86 @@ impl SessionManager {
         }
 
         flush_thought(&mut transcript, &mut current_thought_chunks);
-        flush_assistant(&mut transcript, &mut current_assistant_chunks);
+        flush_assistant(&mut transcript, &mut messages, &mut current_assistant_chunks);
 
-        transcript
+        Ok((messages, transcript))
+    }
+
+    /// Retrieves parsed messages and transcript with fast in-memory caching.
+    pub async fn get_session_data(&self, preferred_session_id: Option<&str>) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
+        let (target_id, file_path) = match self.resolve_session_file(preferred_session_id).await {
+            Some(pair) => pair,
+            None => return (Vec::new(), Vec::new()),
+        };
+
+        let entry = match self.get_or_create(&target_id).await {
+            Ok(e) => e,
+            Err(_) => return (Vec::new(), Vec::new()),
+        };
+
+        let current_len = match tokio::fs::metadata(&file_path).await {
+            Ok(m) => m.len(),
+            Err(_) => return (Vec::new(), Vec::new()),
+        };
+
+        let mut cache_guard = entry.cache.lock().await;
+        if let Some(ref cache) = *cache_guard {
+            if cache.file_len == current_len {
+                return (cache.messages.clone(), cache.transcript.clone());
+            }
+        }
+
+        match Self::parse_session_file(&file_path).await {
+            Ok((messages, transcript)) => {
+                *cache_guard = Some(SessionCache {
+                    file_len: current_len,
+                    messages: messages.clone(),
+                    transcript: transcript.clone(),
+                });
+                (messages, transcript)
+            }
+            Err(e) => {
+                warn!("Failed to parse session file {:?}: {}", file_path, e);
+                if let Some(ref cache) = *cache_guard {
+                    (cache.messages.clone(), cache.transcript.clone())
+                } else {
+                    (Vec::new(), Vec::new())
+                }
+            }
+        }
+    }
+
+    /// Extracts structured chat messages ({ "role": "user" | "assistant", "text": "..." }) from the latest or specified session log.
+    pub async fn get_chat_messages(&self, preferred_session_id: Option<&str>) -> Vec<serde_json::Value> {
+        self.get_session_data(preferred_session_id).await.0
+    }
+
+    /// Returns the session ID of the most recently updated session log.
+    pub async fn get_latest_session_id(&self) -> Option<String> {
+        let mut latest: Option<(String, std::time::SystemTime)> = None;
+        if let Ok(mut dir_entries) = tokio::fs::read_dir(&self.base_dir).await {
+            while let Ok(Some(entry)) = dir_entries.next_entry().await {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                    if stem.is_empty() || stem == "default" {
+                        continue;
+                    }
+                    if let Ok(metadata) = entry.metadata().await {
+                        let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                        if latest.as_ref().map_or(true, |(_, m)| modified > *m) {
+                            latest = Some((stem, modified));
+                        }
+                    }
+                }
+            }
+        }
+        latest.map(|(id, _)| id)
+    }
+
+    /// Extracts structured transcript entries from the session log suitable for mobile rich transcript rendering.
+    pub async fn get_chat_transcript(&self, preferred_session_id: Option<&str>) -> Vec<serde_json::Value> {
+        self.get_session_data(preferred_session_id).await.1
     }
 
     /// Discovers and lists all recorded AntiGravity/ACP conversation threads from `.jsonl` session files.
@@ -541,13 +483,19 @@ impl SessionManager {
                         .map(|d| d.as_secs())
                         .unwrap_or(0);
 
-                    // Scan file to extract title and check if it has messages
+                    // Scan first 60 lines to extract title and check if it has messages
                     let mut title: Option<String> = None;
                     let mut first_prompt: Option<String> = None;
                     let mut has_turns = false;
 
-                    if let Ok(content) = tokio::fs::read_to_string(&path).await {
-                        for line in content.lines() {
+                    if let Ok(file) = tokio::fs::File::open(&path).await {
+                        let mut reader = tokio::io::BufReader::new(file).lines();
+                        let mut line_count = 0;
+                        while let Ok(Some(line)) = reader.next_line().await {
+                            line_count += 1;
+                            if line_count > 60 {
+                                break;
+                            }
                             let trimmed = line.trim();
                             if trimmed.is_empty() {
                                 continue;
@@ -592,6 +540,9 @@ impl SessionManager {
                                         }
                                     }
                                 }
+                            }
+                            if title.is_some() && has_turns {
+                                break;
                             }
                         }
                     }
