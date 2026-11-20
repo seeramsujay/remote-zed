@@ -1,3 +1,20 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="remote-zed Logo" width="120" height="120" />
+</p>
+
+<h1 align="center">remote-zed</h1>
+
+<p align="center">
+  <em>End-to-end Encrypted Zed Remote Workspace Client (Flutter + Rust + Python)</em>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Status-Maintained-success?style=flat-square" alt="Status" />
+  <img src="https://img.shields.io/badge/License-Protected-blue?style=flat-square" alt="License" />
+</p>
+
+---
+
 <div align="center">
 
 # ⚡ Zed Remote
