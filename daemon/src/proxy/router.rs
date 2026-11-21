@@ -485,7 +485,25 @@ impl MessageRouter {
                         let _ = self.mobile_broadcast_tx.send(question_sse);
 
                         let mode = self.current_mode.read().await.clone();
-                        if mode == "yolo" {
+
+                        // Enforce SecurityGuard checks even in YOLO mode to protect laptop host credentials
+                        let mut security_violation = None;
+                        if let Some(cmd_str) = raw_input.get("command").and_then(|v| v.as_str()) {
+                            if let Err(e) = self.security.check_command(cmd_str) {
+                                security_violation = Some(e.to_string());
+                            }
+                        }
+                        if let Some(path_str) = raw_input.get("path").and_then(|v| v.as_str()) {
+                            if crate::security::SecurityGuard::is_sensitive_path(std::path::Path::new(path_str)) {
+                                security_violation = Some(format!("Access to protected system path '{}' is restricted", path_str));
+                            }
+                        }
+
+                        if let Some(ref reason) = security_violation {
+                            warn!("🚨 SecurityGuard blocked auto-approval for tool '{}': {}", tool_name, reason);
+                        }
+
+                        if mode == "yolo" && security_violation.is_none() {
                             info!(
                                 "YOLO mode active: auto-approving subprocess/tool permission {:?} for tool '{}' ({}) in session {}",
                                 req.id, tool_name, tool_call_id, session_id

@@ -349,9 +349,34 @@ impl WebSocketGateway {
             ).await;
         }
 
+        if auth.is_rate_limited(peer_addr.ip()).await {
+            warn!("Rejecting connection from locked-out IP: {}", peer_addr.ip());
+            return Ok(());
+        }
+
         let mut authenticated = false;
 
         let callback = |req: &Request, resp: Response| {
+            // Validate Origin to prevent Cross-Site WebSocket Hijacking (CSWSH)
+            if let Some(origin_val) = req.headers().get("Origin").and_then(|h| h.to_str().ok()) {
+                let origin_lower = origin_val.to_lowercase();
+                let is_safe = origin_lower.contains("localhost")
+                    || origin_lower.contains("127.0.0.1")
+                    || origin_lower.contains("100.")
+                    || origin_lower.contains("192.168.")
+                    || origin_lower.contains("10.")
+                    || origin_lower.contains("172.")
+                    || origin_lower.contains("pinggy")
+                    || origin_lower.contains("zed-remote");
+                if !is_safe {
+                    warn!("Blocked cross-site WebSocket hijacking attempt from origin: {}", origin_val);
+                    return Err(Response::builder()
+                        .status(tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN)
+                        .body(None)
+                        .unwrap());
+                }
+            }
+
             // Check Authorization header first
             if let Some(auth_val) = req.headers().get("Authorization").and_then(|h| h.to_str().ok()) {
                 if let Some(token) = AuthValidator::extract_bearer_token(auth_val) {
@@ -876,7 +901,7 @@ impl WebSocketGateway {
                 return Ok(());
             }
         } else {
-            if token.is_empty() || !auth.validate(token) {
+            if token.is_empty() || !auth.validate_peer(token, peer_addr.ip()).await {
                 warn!("Rejecting unauthorized HTTP request to {} from {}", path, peer_addr);
                 let err_resp = "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 26\r\n\r\n{\"error\":\"unauthorized\"}";
                 let _ = stream.write_all(err_resp.as_bytes()).await;

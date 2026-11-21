@@ -201,6 +201,14 @@ impl TerminalManager {
             ))
         })?;
 
+        // Protect host credentials and sensitive system directories from remote listing
+        if SecurityGuard::is_sensitive_path(&canonical) {
+            return Err(DaemonError::Security(format!(
+                "Directory {:?} contains protected system credentials and cannot be listed",
+                canonical
+            )));
+        }
+
         let mut entries = Vec::new();
         let mut dir_reader = read_dir(&canonical).await?;
 
