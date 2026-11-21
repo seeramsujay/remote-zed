@@ -4,6 +4,12 @@
 //! serving WebSocket connections over Tailscale or Bunker Tunnel, and executing Git, Terminal,
 //! and host telemetry operations.
 
+#![allow(
+    clippy::too_many_arguments,
+    clippy::result_large_err,
+    clippy::new_without_default
+)]
+
 pub mod config;
 pub mod error;
 pub mod gateway;

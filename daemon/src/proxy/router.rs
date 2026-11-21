@@ -1,10 +1,12 @@
 //! Bidirectional message router coordinating Zed stdio, agent subprocess, and mobile clients.
 
 use crate::error::Result;
-use crate::protocol::{error_codes, format_ndjson_line, JsonRpcMessage, JsonRpcResponse, RequestId};
+use crate::protocol::{
+    error_codes, format_ndjson_line, JsonRpcMessage, JsonRpcResponse, RequestId,
+};
 use crate::security::SecurityGuard;
 use crate::session::{MessageDirection, SessionManager};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex, RwLock};
 use tracing::{debug, error, info, warn};
@@ -40,6 +42,8 @@ pub struct MessageRouter {
     pending_agent_requests: Arc<Mutex<HashMap<String, oneshot::Sender<serde_json::Value>>>>,
     /// Map of in-flight prompt requests tracking their associated session ID.
     pending_prompt_sessions: Arc<Mutex<HashMap<String, String>>>,
+    /// Set of in-flight prompt request IDs that originated from a mobile client.
+    mobile_prompt_ids: Arc<Mutex<HashSet<String>>>,
     /// Active operational mode (e.g. "yolo", "auto", "plan").
     current_mode: Arc<RwLock<String>>,
     /// Actively tracked session ID in flight between Zed and the agent.
@@ -64,6 +68,7 @@ impl MessageRouter {
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
             pending_agent_requests: Arc::new(Mutex::new(HashMap::new())),
             pending_prompt_sessions: Arc::new(Mutex::new(HashMap::new())),
+            mobile_prompt_ids: Arc::new(Mutex::new(HashSet::new())),
             current_mode: Arc::new(RwLock::new("yolo".to_string())),
             active_session_id: Arc::new(RwLock::new(None)),
         }
@@ -96,11 +101,17 @@ impl MessageRouter {
         self.zed_stdout_tx
             .send(format_ndjson_line(line))
             .await
-            .map_err(|e| crate::error::DaemonError::Internal(format!("Failed to send to Zed stdout: {}", e)))
+            .map_err(|e| {
+                crate::error::DaemonError::Internal(format!("Failed to send to Zed stdout: {}", e))
+            })
     }
 
     /// Dispatches a request to the child agent and waits asynchronously for its matching response.
-    pub async fn dispatch_agent_request(&self, method: &str, params: serde_json::Value) -> std::result::Result<serde_json::Value, String> {
+    pub async fn dispatch_agent_request(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, String> {
         let req_id = format!("router-{}", uuid::Uuid::new_v4());
         let (tx, rx) = oneshot::channel();
         {
@@ -113,7 +124,8 @@ impl MessageRouter {
             "id": req_id,
             "method": method,
             "params": params
-        }).to_string();
+        })
+        .to_string();
 
         if let Err(e) = self.agent_stdin_tx.send(format_ndjson_line(&rpc_msg)).await {
             let mut pending = self.pending_agent_requests.lock().await;
@@ -163,7 +175,7 @@ impl MessageRouter {
                     }
                 }
             }
-            found_topics.sort_by(|a, b| b.0.cmp(&a.0));
+            found_topics.sort_by_key(|a| std::cmp::Reverse(a.0));
             let topic = match found_topics.into_iter().next() {
                 Some((_, t)) => t,
                 None => return,
@@ -175,13 +187,20 @@ impl MessageRouter {
                 let _ = tokio::process::Command::new("curl")
                     .args([
                         "-fsSL",
-                        "--max-time", "5",
-                        "--connect-timeout", "2",
-                        "-X", "POST",
-                        "-H", &format!("Title: {}", title_owned),
-                        "-H", &format!("Priority: {}", prio_owned),
-                        "-H", &format!("Tags: {}", tags_owned),
-                        "-d", &body_owned,
+                        "--max-time",
+                        "5",
+                        "--connect-timeout",
+                        "2",
+                        "-X",
+                        "POST",
+                        "-H",
+                        &format!("Title: {}", title_owned),
+                        "-H",
+                        &format!("Priority: {}", prio_owned),
+                        "-H",
+                        &format!("Tags: {}", tags_owned),
+                        "-d",
+                        &body_owned,
                         &url,
                     ])
                     .output()
@@ -247,7 +266,10 @@ impl MessageRouter {
     pub async fn resolve_approval(&self, tool_call_id: &str, option_id: &str) -> bool {
         let mut perms = self.pending_permissions.lock().await;
         let found_key = perms.iter().find_map(|(k, v)| {
-            if v.tool_call_id == tool_call_id || k == tool_call_id || k.ends_with(&format!(":{}", tool_call_id)) {
+            if v.tool_call_id == tool_call_id
+                || k == tool_call_id
+                || k.ends_with(&format!(":{}", tool_call_id))
+            {
                 Some(k.clone())
             } else {
                 None
@@ -270,13 +292,18 @@ impl MessageRouter {
                 let outcome = if is_cancel {
                     serde_json::json!({ "outcome": "cancelled" })
                 } else if is_allow {
-                    let matched_id = pending.options.iter()
+                    let matched_id = pending
+                        .options
+                        .iter()
                         .find(|o| o.get("optionId").and_then(|v| v.as_str()) == Some(option_id))
                         .and_then(|o| o.get("optionId").and_then(|v| v.as_str()))
                         .or_else(|| {
-                            pending.options.iter()
+                            pending
+                                .options
+                                .iter()
                                 .find(|o| {
-                                    let opt = o.get("optionId").and_then(|v| v.as_str()).unwrap_or("");
+                                    let opt =
+                                        o.get("optionId").and_then(|v| v.as_str()).unwrap_or("");
                                     let kind = o.get("kind").and_then(|v| v.as_str()).unwrap_or("");
                                     opt.contains("allow") || kind.contains("allow")
                                 })
@@ -285,15 +312,23 @@ impl MessageRouter {
                         .unwrap_or("allow_once");
                     serde_json::json!({ "outcome": "selected", "optionId": matched_id })
                 } else {
-                    let matched_id = pending.options.iter()
+                    let matched_id = pending
+                        .options
+                        .iter()
                         .find(|o| o.get("optionId").and_then(|v| v.as_str()) == Some(option_id))
                         .and_then(|o| o.get("optionId").and_then(|v| v.as_str()))
                         .or_else(|| {
-                            pending.options.iter()
+                            pending
+                                .options
+                                .iter()
                                 .find(|o| {
-                                    let opt = o.get("optionId").and_then(|v| v.as_str()).unwrap_or("");
+                                    let opt =
+                                        o.get("optionId").and_then(|v| v.as_str()).unwrap_or("");
                                     let kind = o.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-                                    opt.contains("reject") || opt.contains("deny") || kind.contains("reject") || kind.contains("deny")
+                                    opt.contains("reject")
+                                        || opt.contains("deny")
+                                        || kind.contains("reject")
+                                        || kind.contains("deny")
                                 })
                                 .and_then(|o| o.get("optionId").and_then(|v| v.as_str()))
                         })
@@ -311,8 +346,14 @@ impl MessageRouter {
                 })
                 .to_string();
 
-                let _ = self.agent_stdin_tx.send(format_ndjson_line(&resp_frame)).await;
-                let _ = self.zed_stdout_tx.send(format_ndjson_line(&resp_frame)).await;
+                let _ = self
+                    .agent_stdin_tx
+                    .send(format_ndjson_line(&resp_frame))
+                    .await;
+                let _ = self
+                    .zed_stdout_tx
+                    .send(format_ndjson_line(&resp_frame))
+                    .await;
                 let _ = self.mobile_broadcast_tx.send(resp_frame);
                 return true;
             }
@@ -337,19 +378,33 @@ impl MessageRouter {
         if let Ok(msg) = JsonRpcMessage::parse(trimmed) {
             match &msg {
                 JsonRpcMessage::Request(req) => {
-                    if let Some(session_id) = req.params.get("sessionId").or_else(|| req.params.get("session_id")).and_then(|v| v.as_str()) {
+                    if let Some(session_id) = req
+                        .params
+                        .get("sessionId")
+                        .or_else(|| req.params.get("session_id"))
+                        .and_then(|v| v.as_str())
+                    {
                         self.set_active_session_id(session_id).await;
                     }
                     if req.method == "session/prompt" {
-                        if let Some(session_id) = req.params.get("sessionId").and_then(|v| v.as_str()) {
+                        if let Some(session_id) =
+                            req.params.get("sessionId").and_then(|v| v.as_str())
+                        {
                             let _ = self.session_manager.acquire_prompt_lock(session_id).await;
                             let id_str = match &req.id {
                                 RequestId::String(s) => s.clone(),
                                 RequestId::Integer(i) => i.to_string(),
                             };
-                            self.pending_prompt_sessions.lock().await.insert(id_str, session_id.to_string());
+                            self.pending_prompt_sessions
+                                .lock()
+                                .await
+                                .insert(id_str, session_id.to_string());
                             self.session_manager
-                                .log_event(session_id, MessageDirection::ZedToAgent, &serde_json::to_value(req).unwrap_or_default())
+                                .log_event(
+                                    session_id,
+                                    MessageDirection::ZedToAgent,
+                                    &serde_json::to_value(req).unwrap_or_default(),
+                                )
                                 .await;
                         }
                     }
@@ -363,7 +418,10 @@ impl MessageRouter {
                         .map(|(k, _)| k.clone());
                     if let Some(tool_call_id) = found_id {
                         perms.remove(&tool_call_id);
-                        info!("Removed pending permission {} resolved by desktop response id {:?}", tool_call_id, res.id);
+                        info!(
+                            "Removed pending permission {} resolved by desktop response id {:?}",
+                            tool_call_id, res.id
+                        );
                     }
                 }
                 _ => {}
@@ -385,20 +443,35 @@ impl MessageRouter {
 
         debug!("Agent -> Proxy: {}", trimmed);
 
+        // Responses to prompts that originated on mobile have no matching
+        // request on Zed's side, so they must never be forwarded to Zed's stdout.
+        let mut suppress_zed_mirror = false;
+
         if let Ok(msg) = JsonRpcMessage::parse(trimmed) {
             match &msg {
                 JsonRpcMessage::Notification(notif) => {
                     if notif.method == "session/update" {
-                        if let Some(session_id) = notif.params.get("sessionId").and_then(|v| v.as_str()) {
+                        if let Some(session_id) =
+                            notif.params.get("sessionId").and_then(|v| v.as_str())
+                        {
                             self.set_active_session_id(session_id).await;
                             self.session_manager.touch_prompt_lock(session_id).await;
                             self.session_manager
-                                .log_event(session_id, MessageDirection::AgentToZed, &serde_json::to_value(notif).unwrap_or_default())
+                                .log_event(
+                                    session_id,
+                                    MessageDirection::AgentToZed,
+                                    &serde_json::to_value(notif).unwrap_or_default(),
+                                )
                                 .await;
 
                             // Check if turn finished to release writer lock
-                            if let Some(update_type) = notif.params.get("update")
-                                .and_then(|u| u.get("sessionUpdateType").or_else(|| u.get("sessionUpdate")))
+                            if let Some(update_type) = notif
+                                .params
+                                .get("update")
+                                .and_then(|u| {
+                                    u.get("sessionUpdateType")
+                                        .or_else(|| u.get("sessionUpdate"))
+                                })
                                 .and_then(|t| t.as_str())
                             {
                                 if update_type == "turn_completed" {
@@ -415,7 +488,12 @@ impl MessageRouter {
                                         })
                                     );
                                     let _ = self.mobile_broadcast_tx.send(completion_sse);
-                                    Self::trigger_bunker_ntfy("AntiGravity Task Finished", "Turn completed on remote-zed", "robot,check", "default");
+                                    Self::trigger_bunker_ntfy(
+                                        "AntiGravity Task Finished",
+                                        "Turn completed on remote-zed",
+                                        "robot,check",
+                                        "default",
+                                    );
                                 }
                             }
                         }
@@ -433,7 +511,10 @@ impl MessageRouter {
 
                         self.set_active_session_id(&session_id).await;
 
-                        let tool_call = req.params.get("toolCall").or_else(|| req.params.get("tool_call"));
+                        let tool_call = req
+                            .params
+                            .get("toolCall")
+                            .or_else(|| req.params.get("tool_call"));
                         let tool_call_id = tool_call
                             .and_then(|t| t.get("toolCallId").or_else(|| t.get("tool_call_id")))
                             .and_then(|i| i.as_str())
@@ -485,7 +566,33 @@ impl MessageRouter {
                         let _ = self.mobile_broadcast_tx.send(question_sse);
 
                         let mode = self.current_mode.read().await.clone();
-                        if mode == "yolo" {
+
+                        // Enforce SecurityGuard checks even in YOLO mode to protect laptop host credentials
+                        let mut security_violation = None;
+                        if let Some(cmd_str) = raw_input.get("command").and_then(|v| v.as_str()) {
+                            if let Err(e) = self.security.check_command(cmd_str) {
+                                security_violation = Some(e.to_string());
+                            }
+                        }
+                        if let Some(path_str) = raw_input.get("path").and_then(|v| v.as_str()) {
+                            if crate::security::SecurityGuard::is_sensitive_path(
+                                std::path::Path::new(path_str),
+                            ) {
+                                security_violation = Some(format!(
+                                    "Access to protected system path '{}' is restricted",
+                                    path_str
+                                ));
+                            }
+                        }
+
+                        if let Some(ref reason) = security_violation {
+                            warn!(
+                                "🚨 SecurityGuard blocked auto-approval for tool '{}': {}",
+                                tool_name, reason
+                            );
+                        }
+
+                        if mode == "yolo" && security_violation.is_none() {
                             info!(
                                 "YOLO mode active: auto-approving subprocess/tool permission {:?} for tool '{}' ({}) in session {}",
                                 req.id, tool_name, tool_call_id, session_id
@@ -494,7 +601,8 @@ impl MessageRouter {
                             let default_allow_option = options
                                 .iter()
                                 .find(|o| {
-                                    let opt_id = o.get("optionId").and_then(|v| v.as_str()).unwrap_or("");
+                                    let opt_id =
+                                        o.get("optionId").and_then(|v| v.as_str()).unwrap_or("");
                                     let kind = o.get("kind").and_then(|v| v.as_str()).unwrap_or("");
                                     opt_id.contains("allow") || kind.contains("allow")
                                 })
@@ -515,12 +623,19 @@ impl MessageRouter {
                             .to_string();
 
                             // Unblock child agent immediately
-                            if let Err(e) = self.agent_stdin_tx.send(format_ndjson_line(&approval_reply)).await {
+                            if let Err(e) = self
+                                .agent_stdin_tx
+                                .send(format_ndjson_line(&approval_reply))
+                                .await
+                            {
                                 error!("Failed to send auto-approval to agent stdin: {}", e);
                             }
 
                             // Mirror auto-approval to Zed stdout and mobile broadcast
-                            let _ = self.zed_stdout_tx.send(format_ndjson_line(&approval_reply)).await;
+                            let _ = self
+                                .zed_stdout_tx
+                                .send(format_ndjson_line(&approval_reply))
+                                .await;
                             let _ = self.mobile_broadcast_tx.send(approval_reply);
 
                             self.session_manager
@@ -544,7 +659,7 @@ impl MessageRouter {
                             "Agent Approval Required",
                             &format!("AntiGravity Agent needs permission: {}", tool_name),
                             "warning,question",
-                            "high"
+                            "high",
                         );
 
                         let scoped_key = format!("{}:{}", session_id, tool_call_id);
@@ -581,6 +696,17 @@ impl MessageRouter {
                     }
                     drop(pending);
 
+                    let is_mobile_prompt = self.mobile_prompt_ids.lock().await.remove(&id_str);
+                    if is_mobile_prompt || id_str.starts_with("mobile-") {
+                        suppress_zed_mirror = true;
+                        if trimmed.contains("\"error\"") {
+                            warn!(
+                                "Agent rejected mobile-originated prompt {}: {}",
+                                id_str, trimmed
+                            );
+                        }
+                    }
+
                     // Releasing prompt lock on tracked session and notifying mobile of turn completion
                     let target_session_id = {
                         let mut p = self.pending_prompt_sessions.lock().await;
@@ -604,15 +730,22 @@ impl MessageRouter {
                             })
                         );
                         let _ = self.mobile_broadcast_tx.send(completion_sse);
-                        Self::trigger_bunker_ntfy("AntiGravity Task Finished", "Turn completed on remote-zed", "robot,check", "default");
+                        Self::trigger_bunker_ntfy(
+                            "AntiGravity Task Finished",
+                            "Turn completed on remote-zed",
+                            "robot,check",
+                            "default",
+                        );
                     }
                 }
             }
         }
 
-        // Mirror to Zed stdout
-        if let Err(e) = self.zed_stdout_tx.send(format_ndjson_line(trimmed)).await {
-            error!("Failed to forward agent output to Zed stdout: {}", e);
+        // Mirror to Zed stdout only if not suppressed (e.g. responses to mobile prompts)
+        if !suppress_zed_mirror {
+            if let Err(e) = self.zed_stdout_tx.send(format_ndjson_line(trimmed)).await {
+                error!("Failed to forward agent output to Zed stdout: {}", e);
+            }
         }
 
         // Broadcast to mobile clients
@@ -647,21 +780,29 @@ impl MessageRouter {
             JsonRpcMessage::Request(req) => {
                 match req.method.as_str() {
                     "session/prompt" => {
-                        let raw_session_id = req.params.get("sessionId")
+                        let raw_session_id = req
+                            .params
+                            .get("sessionId")
                             .and_then(|v| v.as_str())
                             .unwrap_or("default");
 
-                        let session_id = if raw_session_id == "default" || raw_session_id == "main-thread" {
-                            self.get_active_session_id().await.unwrap_or_else(|| "default".to_string())
-                        } else {
-                            raw_session_id.to_string()
-                        };
+                        let session_id =
+                            if raw_session_id == "default" || raw_session_id == "main-thread" {
+                                self.get_active_session_id()
+                                    .await
+                                    .unwrap_or_else(|| "default".to_string())
+                            } else {
+                                raw_session_id.to_string()
+                            };
 
                         // Rewrite payload with resolved session_id if needed
                         let prompt_payload = if session_id != raw_session_id {
                             let mut new_req = req.clone();
                             if let Some(map) = new_req.params.as_object_mut() {
-                                map.insert("sessionId".to_string(), serde_json::Value::String(session_id.clone()));
+                                map.insert(
+                                    "sessionId".to_string(),
+                                    serde_json::Value::String(session_id.clone()),
+                                );
                             }
                             serde_json::to_string(&new_req).unwrap_or_else(|_| trimmed.to_string())
                         } else {
@@ -675,17 +816,30 @@ impl MessageRouter {
                             RequestId::String(s) => s.clone(),
                             RequestId::Integer(i) => i.to_string(),
                         };
-                        self.pending_prompt_sessions.lock().await.insert(id_str.clone(), session_id.clone());
+                        self.pending_prompt_sessions
+                            .lock()
+                            .await
+                            .insert(id_str.clone(), session_id.clone());
+                        self.mobile_prompt_ids.lock().await.insert(id_str.clone());
 
                         // Log event
                         self.session_manager
-                            .log_event(&session_id, MessageDirection::MobileToAgent, &serde_json::to_value(&req).unwrap_or_default())
+                            .log_event(
+                                &session_id,
+                                MessageDirection::MobileToAgent,
+                                &serde_json::to_value(&req).unwrap_or_default(),
+                            )
                             .await;
 
                         // Forward prompt to agent stdin
-                        if let Err(e) = self.agent_stdin_tx.send(format_ndjson_line(&prompt_payload)).await {
+                        if let Err(e) = self
+                            .agent_stdin_tx
+                            .send(format_ndjson_line(&prompt_payload))
+                            .await
+                        {
                             error!("Failed to route mobile prompt to agent: {}", e);
                             self.pending_prompt_sessions.lock().await.remove(&id_str);
+                            self.mobile_prompt_ids.lock().await.remove(&id_str);
                             self.session_manager.release_prompt_lock(&session_id).await;
                             return Some(
                                 serde_json::to_string(&JsonRpcResponse::error(
@@ -697,7 +851,6 @@ impl MessageRouter {
                             );
                         }
 
-
                         // Acknowledge request receipt to mobile
                         Some(
                             serde_json::to_string(&JsonRpcResponse::success(
@@ -708,14 +861,19 @@ impl MessageRouter {
                         )
                     }
                     "session/cancel" => {
-                        let raw_session_id = req.params.get("sessionId")
+                        let raw_session_id = req
+                            .params
+                            .get("sessionId")
                             .and_then(|v| v.as_str())
                             .unwrap_or("default");
-                        let session_id = if raw_session_id == "default" || raw_session_id == "main-thread" {
-                            self.get_active_session_id().await.unwrap_or_else(|| "default".to_string())
-                        } else {
-                            raw_session_id.to_string()
-                        };
+                        let session_id =
+                            if raw_session_id == "default" || raw_session_id == "main-thread" {
+                                self.get_active_session_id()
+                                    .await
+                                    .unwrap_or_else(|| "default".to_string())
+                            } else {
+                                raw_session_id.to_string()
+                            };
                         self.session_manager.release_prompt_lock(&session_id).await;
                         let _ = self.agent_stdin_tx.send(format_ndjson_line(trimmed)).await;
                         Some(
@@ -727,16 +885,27 @@ impl MessageRouter {
                         )
                     }
                     "session/new" => {
-                        match self.dispatch_agent_request("session/new", req.params.clone()).await {
+                        match self
+                            .dispatch_agent_request("session/new", req.params.clone())
+                            .await
+                        {
                             Ok(mut res_val) => {
-                                if let Some(session_id) = res_val.get("result").and_then(|r| r.get("sessionId")).and_then(|s| s.as_str()) {
+                                if let Some(session_id) = res_val
+                                    .get("result")
+                                    .and_then(|r| r.get("sessionId"))
+                                    .and_then(|s| s.as_str())
+                                {
                                     self.set_active_session_id(session_id).await;
                                 }
                                 // Also notify Zed's stdout so desktop tracks the new session
                                 let _ = self.send_to_zed_stdout(&res_val.to_string()).await;
                                 // Restore original mobile request ID for correlation
                                 if let Some(obj) = res_val.as_object_mut() {
-                                    obj.insert("id".to_string(), serde_json::to_value(&req.id).unwrap_or(serde_json::Value::Null));
+                                    obj.insert(
+                                        "id".to_string(),
+                                        serde_json::to_value(&req.id)
+                                            .unwrap_or(serde_json::Value::Null),
+                                    );
                                 }
                                 Some(res_val.to_string())
                             }
@@ -791,5 +960,140 @@ impl MessageRouter {
             }
             JsonRpcMessage::Notification(_) => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_router() -> (
+        MessageRouter,
+        broadcast::Receiver<String>,
+        mpsc::Receiver<String>,
+        mpsc::Receiver<String>,
+    ) {
+        let (mobile_tx, mobile_rx) = broadcast::channel(32);
+        let (agent_stdin_tx, agent_stdin_rx) = mpsc::channel(32);
+        let (zed_stdout_tx, zed_stdout_rx) = mpsc::channel(32);
+        let temp_dir =
+            std::env::temp_dir().join(format!("zed-router-test-{}", uuid::Uuid::new_v4()));
+        let session_manager = SessionManager::new(temp_dir.clone());
+        let security = SecurityGuard::new(temp_dir, vec![]);
+        let router = MessageRouter::new(
+            mobile_tx,
+            agent_stdin_tx,
+            zed_stdout_tx,
+            session_manager,
+            security,
+        );
+        (router, mobile_rx, agent_stdin_rx, zed_stdout_rx)
+    }
+
+    #[tokio::test]
+    async fn test_mobile_prompt_numeric_id_suppresses_zed_stdout() {
+        let (router, mut mobile_rx, mut agent_stdin_rx, mut zed_stdout_rx) = create_test_router();
+
+        // 1. Mobile client sends session/prompt with integer id 42
+        let mobile_msg = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 42,
+            "method": "session/prompt",
+            "params": {
+                "sessionId": "test-session-1",
+                "prompt": [{"type": "text", "text": "hello from mobile"}]
+            }
+        })
+        .to_string();
+
+        let ack = router.handle_mobile_message(&mobile_msg).await;
+        assert!(ack.is_some());
+
+        // Agent stdin receives the prompt
+        let forwarded_to_agent = agent_stdin_rx.recv().await.unwrap();
+        assert!(forwarded_to_agent.contains("hello from mobile"));
+
+        // 2. Agent responds to prompt 42
+        let agent_response = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 42,
+            "result": { "stopReason": "end_turn" }
+        })
+        .to_string();
+
+        router.handle_agent_output(&agent_response).await;
+
+        // Verify Zed stdout does NOT receive the response (suppressed!)
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), zed_stdout_rx.recv())
+                .await
+                .is_err()
+        );
+
+        // Verify mobile broadcast receives the response
+        let mobile_broadcast = mobile_rx.recv().await.unwrap();
+        assert!(
+            mobile_broadcast.contains("thread_completed") || mobile_broadcast.contains("end_turn")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_desktop_prompt_forwards_to_zed_stdout() {
+        let (router, mut _mobile_rx, mut agent_stdin_rx, mut zed_stdout_rx) = create_test_router();
+
+        // 1. Desktop sends prompt with id 100
+        let desktop_msg = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 100,
+            "method": "session/prompt",
+            "params": {
+                "sessionId": "desktop-session",
+                "prompt": [{"type": "text", "text": "desktop prompt"}]
+            }
+        })
+        .to_string();
+
+        router.handle_zed_input(&desktop_msg).await;
+        let _ = agent_stdin_rx.recv().await.unwrap();
+
+        // 2. Agent responds to desktop prompt 100
+        let agent_response = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 100,
+            "result": { "stopReason": "end_turn" }
+        })
+        .to_string();
+
+        router.handle_agent_output(&agent_response).await;
+
+        // Verify Zed stdout receives the mirrored response
+        let zed_out =
+            tokio::time::timeout(std::time::Duration::from_millis(500), zed_stdout_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+        assert!(zed_out.contains("\"id\":100"));
+    }
+
+    #[tokio::test]
+    async fn test_mobile_prefix_suppresses_zed_stdout() {
+        let (router, mut _mobile_rx, _agent_stdin_rx, mut zed_stdout_rx) = create_test_router();
+
+        // Agent output with mobile- prefix (even without prior in-memory registration)
+        let agent_response = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "mobile-abc-xyz",
+            "result": { "stopReason": "end_turn" }
+        })
+        .to_string();
+
+        router.handle_agent_output(&agent_response).await;
+
+        // Verify Zed stdout does NOT receive the response
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), zed_stdout_rx.recv())
+                .await
+                .is_err()
+        );
     }
 }

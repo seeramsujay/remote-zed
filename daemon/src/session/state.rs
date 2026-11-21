@@ -110,7 +110,12 @@ impl SessionManager {
     }
 
     /// Logs an event frame across the appropriate session logger.
-    pub async fn log_event(&self, session_id: &str, direction: MessageDirection, frame: &serde_json::Value) {
+    pub async fn log_event(
+        &self,
+        session_id: &str,
+        direction: MessageDirection,
+        frame: &serde_json::Value,
+    ) {
         match self.get_or_create(session_id).await {
             Ok(entry) => {
                 entry.logger.log(direction, frame).await;
@@ -122,13 +127,20 @@ impl SessionManager {
     }
 
     /// Replays events for a session starting from a specific sequence number.
-    pub async fn replay_events(&self, session_id: &str, from_seq: u64) -> Result<Vec<SessionLogEntry>> {
+    pub async fn replay_events(
+        &self,
+        session_id: &str,
+        from_seq: u64,
+    ) -> Result<Vec<SessionLogEntry>> {
         let entry = self.get_or_create(session_id).await?;
         entry.logger.read_events_from(from_seq).await
     }
 
     /// Resolves the session ID and file path for a requested or latest session.
-    pub async fn resolve_session_file(&self, preferred_session_id: Option<&str>) -> Option<(String, PathBuf)> {
+    pub async fn resolve_session_file(
+        &self,
+        preferred_session_id: Option<&str>,
+    ) -> Option<(String, PathBuf)> {
         if let Some(id) = preferred_session_id {
             let p = self.base_dir.join(format!("{}.jsonl", id));
             if p.exists() {
@@ -140,13 +152,19 @@ impl SessionManager {
             while let Ok(Some(entry)) = dir_entries.next_entry().await {
                 let path = entry.path();
                 if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                    let stem = path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string();
                     if stem.is_empty() || stem == "default" {
                         continue;
                     }
                     if let Ok(metadata) = entry.metadata().await {
-                        let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                        if latest_file.as_ref().map_or(true, |(_, _, m)| modified > *m) {
+                        let modified = metadata
+                            .modified()
+                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                        if latest_file.as_ref().is_none_or(|(_, _, m)| modified > *m) {
                             latest_file = Some((stem, path, modified));
                         }
                     }
@@ -157,7 +175,9 @@ impl SessionManager {
     }
 
     /// Parses a session `.jsonl` file in a single streaming pass into chat messages and rich transcript.
-    pub async fn parse_session_file(path: &std::path::Path) -> std::io::Result<(Vec<serde_json::Value>, Vec<serde_json::Value>)> {
+    pub async fn parse_session_file(
+        path: &std::path::Path,
+    ) -> std::io::Result<(Vec<serde_json::Value>, Vec<serde_json::Value>)> {
         let file = tokio::fs::File::open(path).await?;
 
         let mut messages = Vec::new();
@@ -183,7 +203,9 @@ impl SessionManager {
             }
         };
 
-        let flush_assistant = |transcript: &mut Vec<serde_json::Value>, messages: &mut Vec<serde_json::Value>, chunks: &mut Vec<String>| {
+        let flush_assistant = |transcript: &mut Vec<serde_json::Value>,
+                               messages: &mut Vec<serde_json::Value>,
+                               chunks: &mut Vec<String>| {
             if !chunks.is_empty() {
                 let text = chunks.join("");
                 let clean = text.trim();
@@ -224,7 +246,11 @@ impl SessionManager {
             let method = frame.get("method").and_then(|m| m.as_str()).unwrap_or("");
             if method == "session/prompt" {
                 flush_thought(&mut transcript, &mut current_thought_chunks);
-                flush_assistant(&mut transcript, &mut messages, &mut current_assistant_chunks);
+                flush_assistant(
+                    &mut transcript,
+                    &mut messages,
+                    &mut current_assistant_chunks,
+                );
 
                 let p = frame.get("params").and_then(|p| p.get("prompt"));
                 let user_text = if let Some(arr) = p.and_then(|p| p.as_array()) {
@@ -271,7 +297,11 @@ impl SessionManager {
                     .unwrap_or("");
 
                 if t == "agent_thought_chunk" {
-                    flush_assistant(&mut transcript, &mut messages, &mut current_assistant_chunks);
+                    flush_assistant(
+                        &mut transcript,
+                        &mut messages,
+                        &mut current_assistant_chunks,
+                    );
                     if let Some(chunk_text) = update
                         .get("content")
                         .and_then(|c| c.get("text"))
@@ -290,7 +320,11 @@ impl SessionManager {
                     }
                 } else if t == "tool_call" {
                     flush_thought(&mut transcript, &mut current_thought_chunks);
-                    flush_assistant(&mut transcript, &mut messages, &mut current_assistant_chunks);
+                    flush_assistant(
+                        &mut transcript,
+                        &mut messages,
+                        &mut current_assistant_chunks,
+                    );
 
                     let tool_call_id = update
                         .get("toolCallId")
@@ -352,9 +386,14 @@ impl SessionManager {
 
                     let mut found = false;
                     for entry in transcript.iter_mut().rev() {
-                        if entry.get("tool_call_id").and_then(|id| id.as_str()) == Some(tool_call_id) {
+                        if entry.get("tool_call_id").and_then(|id| id.as_str())
+                            == Some(tool_call_id)
+                        {
                             if let Some(obj) = entry.as_object_mut() {
-                                obj.insert("status".to_string(), serde_json::Value::String(status.to_string()));
+                                obj.insert(
+                                    "status".to_string(),
+                                    serde_json::Value::String(status.to_string()),
+                                );
                                 obj.insert("raw_output".to_string(), raw_output.clone());
                             }
                             found = true;
@@ -377,13 +416,20 @@ impl SessionManager {
         }
 
         flush_thought(&mut transcript, &mut current_thought_chunks);
-        flush_assistant(&mut transcript, &mut messages, &mut current_assistant_chunks);
+        flush_assistant(
+            &mut transcript,
+            &mut messages,
+            &mut current_assistant_chunks,
+        );
 
         Ok((messages, transcript))
     }
 
     /// Retrieves parsed messages and transcript with fast in-memory caching.
-    pub async fn get_session_data(&self, preferred_session_id: Option<&str>) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
+    pub async fn get_session_data(
+        &self,
+        preferred_session_id: Option<&str>,
+    ) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
         let (target_id, file_path) = match self.resolve_session_file(preferred_session_id).await {
             Some(pair) => pair,
             None => return (Vec::new(), Vec::new()),
@@ -427,7 +473,10 @@ impl SessionManager {
     }
 
     /// Extracts structured chat messages ({ "role": "user" | "assistant", "text": "..." }) from the latest or specified session log.
-    pub async fn get_chat_messages(&self, preferred_session_id: Option<&str>) -> Vec<serde_json::Value> {
+    pub async fn get_chat_messages(
+        &self,
+        preferred_session_id: Option<&str>,
+    ) -> Vec<serde_json::Value> {
         self.get_session_data(preferred_session_id).await.0
     }
 
@@ -438,13 +487,19 @@ impl SessionManager {
             while let Ok(Some(entry)) = dir_entries.next_entry().await {
                 let path = entry.path();
                 if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                    let stem = path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string();
                     if stem.is_empty() || stem == "default" {
                         continue;
                     }
                     if let Ok(metadata) = entry.metadata().await {
-                        let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                        if latest.as_ref().map_or(true, |(_, m)| modified > *m) {
+                        let modified = metadata
+                            .modified()
+                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                        if latest.as_ref().is_none_or(|(_, m)| modified > *m) {
                             latest = Some((stem, modified));
                         }
                     }
@@ -455,7 +510,10 @@ impl SessionManager {
     }
 
     /// Extracts structured transcript entries from the session log suitable for mobile rich transcript rendering.
-    pub async fn get_chat_transcript(&self, preferred_session_id: Option<&str>) -> Vec<serde_json::Value> {
+    pub async fn get_chat_transcript(
+        &self,
+        preferred_session_id: Option<&str>,
+    ) -> Vec<serde_json::Value> {
         self.get_session_data(preferred_session_id).await.1
     }
 
@@ -466,7 +524,11 @@ impl SessionManager {
             while let Ok(Some(entry)) = dir_entries.next_entry().await {
                 let path = entry.path();
                 if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                    let session_id = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                    let session_id = path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string();
                     if session_id.is_empty() {
                         continue;
                     }
@@ -502,13 +564,20 @@ impl SessionManager {
                             }
                             if let Ok(data) = serde_json::from_str::<serde_json::Value>(trimmed) {
                                 if let Some(frame) = data.get("frame") {
-                                    let method = frame.get("method").and_then(|m| m.as_str()).unwrap_or("");
+                                    let method =
+                                        frame.get("method").and_then(|m| m.as_str()).unwrap_or("");
                                     if method == "session/prompt" {
                                         has_turns = true;
                                         if first_prompt.is_none() {
-                                            if let Some(arr) = frame.get("params").and_then(|p| p.get("prompt")).and_then(|p| p.as_array()) {
+                                            if let Some(arr) = frame
+                                                .get("params")
+                                                .and_then(|p| p.get("prompt"))
+                                                .and_then(|p| p.as_array())
+                                            {
                                                 for item in arr {
-                                                    if let Some(t) = item.get("text").and_then(|t| t.as_str()) {
+                                                    if let Some(t) =
+                                                        item.get("text").and_then(|t| t.as_str())
+                                                    {
                                                         let clean = t.trim();
                                                         if !clean.is_empty() {
                                                             first_prompt = Some(clean.to_string());
@@ -516,25 +585,35 @@ impl SessionManager {
                                                         }
                                                     }
                                                 }
-                                            } else if let Some(s) = frame.get("params").and_then(|p| p.get("prompt")).and_then(|p| p.as_str()) {
+                                            } else if let Some(s) = frame
+                                                .get("params")
+                                                .and_then(|p| p.get("prompt"))
+                                                .and_then(|p| p.as_str())
+                                            {
                                                 first_prompt = Some(s.trim().to_string());
                                             }
                                         }
                                     } else if method == "session/update" {
-                                        if let Some(update) = frame.get("params").and_then(|p| p.get("update")) {
+                                        if let Some(update) =
+                                            frame.get("params").and_then(|p| p.get("update"))
+                                        {
                                             let update_type = update
                                                 .get("sessionUpdate")
                                                 .or_else(|| update.get("sessionUpdateType"))
                                                 .and_then(|s| s.as_str())
                                                 .unwrap_or("");
                                             if update_type == "session_info_update" {
-                                                if let Some(t) = update.get("title").and_then(|t| t.as_str()) {
+                                                if let Some(t) =
+                                                    update.get("title").and_then(|t| t.as_str())
+                                                {
                                                     let clean = t.trim();
                                                     if !clean.is_empty() {
                                                         title = Some(clean.to_string());
                                                     }
                                                 }
-                                            } else if update_type == "agent_message_chunk" || update_type == "user_message_chunk" {
+                                            } else if update_type == "agent_message_chunk"
+                                                || update_type == "user_message_chunk"
+                                            {
                                                 has_turns = true;
                                             }
                                         }
@@ -552,21 +631,23 @@ impl SessionManager {
                         continue;
                     }
 
-                    let resolved_title = title.or_else(|| {
-                        first_prompt.map(|p| {
-                            if p.chars().count() > 40 {
-                                format!("{}…", p.chars().take(40).collect::<String>())
-                            } else {
-                                p
-                            }
+                    let resolved_title = title
+                        .or_else(|| {
+                            first_prompt.map(|p| {
+                                if p.chars().count() > 40 {
+                                    format!("{}…", p.chars().take(40).collect::<String>())
+                                } else {
+                                    p
+                                }
+                            })
                         })
-                    }).unwrap_or_else(|| {
-                        if session_id.len() >= 8 {
-                            format!("AntiGravity Chat {}", &session_id[..8])
-                        } else {
-                            "AntiGravity Conversation".to_string()
-                        }
-                    });
+                        .unwrap_or_else(|| {
+                            if session_id.len() >= 8 {
+                                format!("AntiGravity Chat {}", &session_id[..8])
+                            } else {
+                                "AntiGravity Conversation".to_string()
+                            }
+                        });
 
                     sessions_info.push((
                         modified_time,
@@ -580,14 +661,14 @@ impl SessionManager {
                                 "is_native": false
                             },
                             "last_updated": modified_time
-                        })
+                        }),
                     ));
                 }
             }
         }
 
         // Sort descending by modified time (most recent first)
-        sessions_info.sort_by(|a, b| b.0.cmp(&a.0));
+        sessions_info.sort_by_key(|a| std::cmp::Reverse(a.0));
         sessions_info.into_iter().map(|(_, val)| val).collect()
     }
 }
@@ -604,7 +685,10 @@ mod tests {
         let sid = "session-test-lock";
         assert!(!manager.is_session_busy(sid).await);
 
-        manager.acquire_prompt_lock(sid).await.expect("Should acquire lock");
+        manager
+            .acquire_prompt_lock(sid)
+            .await
+            .expect("Should acquire lock");
         assert!(manager.is_session_busy(sid).await);
 
         manager.touch_prompt_lock(sid).await;
@@ -731,7 +815,10 @@ mod tests {
 
         // 2. Coalesced Thought block
         assert_eq!(transcript[1]["kind"], "thought");
-        assert_eq!(transcript[1]["text"], "Analyzing the logs... Found prompt lock bug.");
+        assert_eq!(
+            transcript[1]["text"],
+            "Analyzing the logs... Found prompt lock bug."
+        );
 
         // 3. Tool call with updated status
         assert_eq!(transcript[2]["kind"], "tool");

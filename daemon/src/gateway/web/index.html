@@ -1,0 +1,1770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Zed Remote</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#087ea4">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Zed Remote">
+  <style>
+    :root {
+      --bg: #12151c;
+      --header-bg: #181c25;
+      --card-bg: #1c212c;
+      --card-hover: #232a38;
+      --border: #293140;
+      --border-focus: #38bdf8;
+      --primary: #38bdf8;
+      --primary-dim: rgba(56, 189, 248, 0.15);
+      --accent: #818cf8;
+      --success: #4ade80;
+      --warning: #fbbf24;
+      --danger: #f87171;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --code-bg: #0d1117;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      height: 100dvh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    header {
+      background-color: var(--header-bg);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      z-index: 100;
+      padding-top: calc(10px + env(safe-area-inset-top, 0px));
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: -0.3px;
+    }
+
+    .brand img {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+    }
+
+    .brand-version {
+      font-size: 10px;
+      background: var(--primary-dim);
+      color: var(--primary);
+      padding: 2px 6px;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+
+    .header-center {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .workspace-pill {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      max-width: 180px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .workspace-pill:hover {
+      border-color: var(--primary);
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .connection-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.2s;
+    }
+
+    .connection-status:hover {
+      border-color: var(--primary);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--warning);
+      transition: background-color 0.3s;
+    }
+
+    .status-dot.connected {
+      background-color: var(--success);
+      box-shadow: 0 0 8px rgba(74, 222, 128, 0.6);
+    }
+
+    .status-dot.connecting {
+      background-color: var(--warning);
+      animation: status-pulse 1.2s infinite ease-in-out;
+    }
+
+    .status-dot.error {
+      background-color: var(--danger);
+      box-shadow: 0 0 6px rgba(248, 113, 113, 0.6);
+    }
+
+    @keyframes status-pulse {
+      0%, 100% { opacity: 0.4; transform: scale(0.9); }
+      50% { opacity: 1; transform: scale(1.1); }
+    }
+
+    .status-label {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+    }
+
+    .mode-pill {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(251, 191, 36, 0.15);
+      color: var(--warning);
+      border: 1px solid rgba(251, 191, 36, 0.3);
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+
+    .mode-pill.yolo {
+      background: rgba(248, 113, 113, 0.15);
+      color: var(--danger);
+      border-color: rgba(248, 113, 113, 0.4);
+    }
+
+    .icon-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 6px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .icon-btn:hover {
+      background: var(--card-hover);
+      color: var(--text);
+    }
+
+    /* Main Container & Views */
+    main {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .view {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .view.active {
+      display: flex;
+    }
+
+    /* Navigation Bar */
+    nav.bottom-nav {
+      background: var(--header-bg);
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+      padding-top: 6px;
+      z-index: 100;
+    }
+
+    .nav-item {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      padding: 4px 12px;
+      border-radius: 8px;
+      transition: all 0.2s;
+    }
+
+    .nav-item svg {
+      width: 20px;
+      height: 20px;
+      stroke-width: 2;
+    }
+
+    .nav-item.active {
+      color: var(--primary);
+    }
+
+    .nav-item.active svg {
+      stroke: var(--primary);
+    }
+
+    /* CHAT VIEW */
+    .chat-subbar {
+      background: rgba(24, 28, 37, 0.85);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .thread-select {
+      background: var(--card-bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 12px;
+      max-width: 220px;
+      outline: none;
+    }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      scroll-behavior: smooth;
+    }
+
+    .msg-bubble {
+      max-width: 90%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+
+    .msg-bubble.user {
+      align-self: flex-end;
+      background: var(--primary-dim);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      color: var(--text);
+      border-bottom-right-radius: 2px;
+    }
+
+    .msg-bubble.assistant {
+      align-self: flex-start;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-bottom-left-radius: 2px;
+      width: 100%;
+    }
+
+    .thought-card {
+      margin-bottom: 10px;
+      background: rgba(13, 17, 23, 0.7);
+      border: 1px solid rgba(129, 140, 248, 0.2);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .thought-card summary {
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--accent);
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+    }
+
+    .thought-body {
+      padding: 8px 10px;
+      font-size: 12px;
+      color: var(--text-muted);
+      border-top: 1px solid rgba(129, 140, 248, 0.15);
+      white-space: pre-wrap;
+      font-family: var(--font-mono);
+      max-height: 250px;
+      overflow-y: auto;
+    }
+
+    pre code {
+      display: block;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      overflow-x: auto;
+      margin: 6px 0;
+    }
+
+    /* Tool Approvals Banner */
+    .approval-card {
+      background: rgba(251, 191, 36, 0.1);
+      border: 1px solid rgba(251, 191, 36, 0.4);
+      border-radius: 10px;
+      padding: 12px;
+      margin: 10px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .approval-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--warning);
+    }
+
+    .approval-cmd {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      padding: 6px 8px;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--primary);
+      overflow-x: auto;
+    }
+
+    .approval-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 4px;
+    }
+
+    .btn {
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: opacity 0.2s;
+    }
+
+    .btn:hover {
+      opacity: 0.85;
+    }
+
+    .btn-success {
+      background: var(--success);
+      color: #0f172a;
+    }
+
+    .btn-danger {
+      background: var(--danger);
+      color: #0f172a;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #0f172a;
+    }
+
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .btn-sm {
+      padding: 4px 8px;
+      font-size: 11px;
+    }
+
+    /* Chat Input */
+    .chat-input-bar {
+      background: var(--header-bg);
+      border-top: 1px solid var(--border);
+      padding: 8px 12px;
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+    }
+
+    .chat-input-bar textarea {
+      flex: 1;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      padding: 8px 12px;
+      resize: none;
+      max-height: 120px;
+      min-height: 38px;
+      outline: none;
+    }
+
+    .chat-input-bar textarea:focus {
+      border-color: var(--border-focus);
+    }
+
+    .send-btn {
+      background: var(--primary);
+      color: #0f172a;
+      border: none;
+      border-radius: 10px;
+      width: 38px;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    /* FILES VIEW */
+    .files-header {
+      padding: 10px 14px;
+      background: var(--header-bg);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .breadcrumb {
+      font-size: 13px;
+      font-family: var(--font-mono);
+      color: var(--primary);
+      overflow-x: auto;
+      white-space: nowrap;
+      padding-bottom: 2px;
+    }
+
+    .files-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .file-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .file-item:hover {
+      background: var(--card-hover);
+      border-color: var(--border-focus);
+    }
+
+    .file-item-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .file-item-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    /* Workspaces Section */
+    .workspaces-section {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      letter-spacing: 0.5px;
+    }
+
+    .workspaces-scroll {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .workspace-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 140px;
+    }
+
+    .workspace-card.active {
+      border-color: var(--primary);
+      background: var(--primary-dim);
+    }
+
+    /* GIT VIEW */
+    .git-header {
+      padding: 12px 14px;
+      background: var(--header-bg);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .git-branch-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--primary);
+    }
+
+    .git-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .git-box {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .git-file-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      padding: 4px 0;
+      border-bottom: 1px solid rgba(41, 49, 64, 0.4);
+    }
+
+    .git-file-row:last-child {
+      border-bottom: none;
+    }
+
+    .git-commit-box textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      color: var(--text);
+      font-size: 13px;
+      resize: none;
+      min-height: 60px;
+      outline: none;
+    }
+
+    /* TERMINAL VIEW */
+    .terminal-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #090c10;
+      overflow: hidden;
+    }
+
+    .terminal-output {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: #38bdf8;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .terminal-input-row {
+      display: flex;
+      align-items: center;
+      background: #161b22;
+      border-top: 1px solid var(--border);
+      padding: 6px 10px;
+    }
+
+    .terminal-prompt {
+      color: var(--success);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      margin-right: 6px;
+    }
+
+    .terminal-input-row input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      outline: none;
+    }
+
+    .quick-keys-bar {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding: 6px 10px;
+      background: #11141b;
+      border-top: 1px solid var(--border);
+    }
+
+    .qk-btn {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .qk-btn:active {
+      background: var(--primary);
+      color: #0f172a;
+    }
+
+    /* SYSTEM VIEW */
+    .system-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .telemetry-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .tele-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .tele-val {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    .tele-lbl {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    /* Modal */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 1000;
+    }
+
+    .modal-backdrop.active {
+      display: flex;
+    }
+
+    .modal-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      width: 100%;
+      max-width: 400px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .modal-card input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+    }
+
+    /* Responsive Tablet/Desktop */
+    @media (min-width: 768px) {
+      body {
+        flex-direction: row;
+      }
+      header {
+        position: fixed;
+        top: 0;
+        left: 200px;
+        right: 0;
+      }
+      nav.bottom-nav {
+        flex-direction: column;
+        width: 200px;
+        height: 100dvh;
+        border-top: none;
+        border-right: 1px solid var(--border);
+        justify-content: flex-start;
+        padding-top: 20px;
+        gap: 8px;
+      }
+      .nav-item {
+        width: 90%;
+        flex-direction: row;
+        gap: 10px;
+        padding: 8px 12px;
+        font-size: 13px;
+      }
+      main {
+        margin-top: 52px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <img src="/logo.svg" alt="Zed Logo">
+      <span>Zed Remote</span>
+      <span class="brand-version">PWA</span>
+    </div>
+
+    <div class="header-center">
+      <div class="workspace-pill" id="current-workspace-btn" onclick="switchView('files')">
+        <span>📁</span>
+        <span id="current-workspace-name">Loading...</span>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <div class="mode-pill yolo" id="mode-toggle-btn" onclick="toggleYoloMode()">YOLO</div>
+      <div class="connection-status" id="connection-status" onclick="reconnectNow()" title="Click to reconnect">
+        <div class="status-dot" id="status-dot"></div>
+        <span class="status-label" id="status-label">Online</span>
+      </div>
+      <button class="icon-btn" onclick="openSettingsModal()" title="Auth & Pairing">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main View Container -->
+  <main>
+    <!-- 1. CHAT VIEW -->
+    <section class="view active" id="view-chat">
+      <div class="chat-subbar">
+        <select class="thread-select" id="thread-selector" onchange="switchThread(this.value)">
+          <option value="main-thread">AntiGravity AI Workspace</option>
+        </select>
+        <button class="btn btn-outline btn-sm" onclick="createNewThread()">+ New Chat</button>
+      </div>
+
+      <div class="chat-messages" id="chat-messages">
+        <!-- Messages & Tool cards will appear here -->
+      </div>
+
+      <!-- Pending Tool Approvals Banner -->
+      <div id="approvals-container" style="padding: 0 14px;"></div>
+
+      <div class="chat-input-bar">
+        <textarea id="prompt-input" rows="1" placeholder="Ask Agent to edit files, run tests, command Pi..." oninput="autoExpandTextarea(this)" onkeydown="handleChatKey(event)"></textarea>
+        <button class="send-btn" id="send-prompt-btn" onclick="sendPrompt()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+    </section>
+
+    <!-- 2. FILES VIEW -->
+    <section class="view" id="view-files">
+      <div class="workspaces-section">
+        <div class="section-title">Open Zed Workspaces (Desktop)</div>
+        <div class="workspaces-scroll" id="open-workspaces-list">
+          <div class="workspace-card">Loading...</div>
+        </div>
+      </div>
+
+      <div class="files-header">
+        <div class="breadcrumb" id="current-fs-path">/</div>
+        <button class="btn btn-outline btn-sm" onclick="navigateFsUp()">⬆ Up</button>
+      </div>
+
+      <div class="files-list" id="files-list">
+        <!-- File & directory items -->
+      </div>
+    </section>
+
+    <!-- 3. GIT VIEW -->
+    <section class="view" id="view-git">
+      <div class="git-header">
+        <div class="git-branch-badge">
+          <span>🌿</span>
+          <span id="git-branch-name">main</span>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-outline btn-sm" onclick="loadGitStatus()">↻ Refresh</button>
+          <button class="btn btn-primary btn-sm" onclick="gitPush()">⬆ Push</button>
+        </div>
+      </div>
+
+      <div class="git-content">
+        <div class="git-box">
+          <div class="section-title">Staged Files (<span id="git-staged-count">0</span>)</div>
+          <div id="git-staged-list"><span style="color:var(--text-muted);font-size:12px;">No staged files</span></div>
+        </div>
+
+        <div class="git-box">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div class="section-title">Changes (<span id="git-unstaged-count">0</span>)</div>
+            <button class="btn btn-outline btn-sm" onclick="stageAllGitFiles()">Stage All</button>
+          </div>
+          <div id="git-unstaged-list"><span style="color:var(--text-muted);font-size:12px;">No changes</span></div>
+        </div>
+
+        <div class="git-box git-commit-box">
+          <div class="section-title">Commit Message</div>
+          <textarea id="git-commit-msg" placeholder="feat: implement mobile web bridge..."></textarea>
+          <button class="btn btn-success" style="align-self:flex-end;" onclick="gitCommit()">Commit</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. TERMINAL VIEW -->
+    <section class="view" id="view-terminal">
+      <div class="terminal-container">
+        <div class="terminal-output" id="terminal-output">Zed Remote Interactive Shell Ready.
+Type a command or tap quick keys below.
+</div>
+        
+        <div class="quick-keys-bar">
+          <button class="qk-btn" onclick="insertQuickKey('TAB')">TAB</button>
+          <button class="qk-btn" onclick="insertQuickKey('Ctrl+C')">Ctrl+C</button>
+          <button class="qk-btn" onclick="insertQuickKey('~')">~</button>
+          <button class="qk-btn" onclick="insertQuickKey('/')">/</button>
+          <button class="qk-btn" onclick="insertQuickKey('|')">|</button>
+          <button class="qk-btn" onclick="insertQuickKey('-')">-</button>
+          <button class="qk-btn" onclick="insertQuickKey('..')">..</button>
+          <button class="qk-btn" onclick="insertQuickKey('clear\n')">CLEAR</button>
+          <button class="qk-btn" onclick="insertQuickKey('ls -la\n')">ls</button>
+          <button class="qk-btn" onclick="insertQuickKey('git status\n')">git</button>
+        </div>
+
+        <div class="terminal-input-row">
+          <span class="terminal-prompt">$</span>
+          <input type="text" id="terminal-input" placeholder="bash command..." onkeydown="handleTerminalKey(event)">
+          <button class="btn btn-primary btn-sm" onclick="runTerminalCommand()">Run</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. SYSTEM VIEW -->
+    <section class="view" id="view-system">
+      <div class="system-content">
+        <div class="section-title">Host Telemetry</div>
+        <div class="telemetry-grid">
+          <div class="tele-card">
+            <div class="tele-val" id="tele-cpu">-- %</div>
+            <div class="tele-lbl">CPU Usage</div>
+          </div>
+          <div class="tele-card">
+            <div class="tele-val" id="tele-ram">-- %</div>
+            <div class="tele-lbl">Memory Usage</div>
+          </div>
+          <div class="tele-card">
+            <div class="tele-val" id="tele-battery">-- %</div>
+            <div class="tele-lbl">Host Battery</div>
+          </div>
+          <div class="tele-card">
+            <div class="tele-val" id="tele-status">Online</div>
+            <div class="tele-lbl">Daemon State</div>
+          </div>
+        </div>
+
+        <div class="git-box" style="margin-top:10px;">
+          <div class="section-title">Pairing & Quick Connect</div>
+          <p style="font-size:12px; color:var(--text-muted);">
+            Open this URL on your phone or tablet to control Zed sessions remotely:
+          </p>
+          <input type="text" id="share-url-box" readonly style="background:var(--bg); border:1px solid var(--border); padding:8px; border-radius:6px; color:var(--primary); font-family:var(--font-mono); font-size:12px;" onclick="this.select()">
+          <button class="btn btn-outline btn-sm" style="align-self:flex-start;" onclick="copyShareUrl()">Copy Pairing URL</button>
+        </div>
+
+        <div class="git-box">
+          <div class="section-title">PWA Mobile Installation</div>
+          <p style="font-size:12px; color:var(--text-muted);">
+            • <b>Android / Chrome:</b> Tap the browser menu (⋮) and select <b>"Install app"</b> or <b>"Add to Home screen"</b>.<br>
+            • <b>iOS / Safari:</b> Tap the Share button (⎋) and choose <b>"Add to Home Screen"</b>.<br>
+            This opens Zed Remote as a full-screen, native-feeling app without browser toolbars.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Bottom Navigation -->
+  <nav class="bottom-nav">
+    <button class="nav-item active" onclick="switchView('chat')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+      <span>Chat</span>
+    </button>
+    <button class="nav-item" onclick="switchView('files')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+      <span>Files</span>
+    </button>
+    <button class="nav-item" onclick="switchView('git')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+      <span>Git</span>
+    </button>
+    <button class="nav-item" onclick="switchView('terminal')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+      <span>Shell</span>
+    </button>
+    <button class="nav-item" onclick="switchView('system')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      <span>System</span>
+    </button>
+  </nav>
+
+  <!-- Settings / Token Modal -->
+  <div class="modal-backdrop" id="settings-modal">
+    <div class="modal-card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="font-size:16px;">Gateway Authentication</h3>
+        <button class="icon-btn" onclick="closeSettingsModal()">✕</button>
+      </div>
+      <p style="font-size:12px; color:var(--text-muted);">
+        Enter the secret Bearer Token configured on your Zed Remote daemon.
+      </p>
+      <input type="text" id="token-input" placeholder="Token: zed-secret-..." autocomplete="off">
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn btn-outline" onclick="closeSettingsModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveTokenAndReconnect()">Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- State & Config ---
+    let token = '';
+    let currentThreadId = 'main-thread';
+    let currentFsPath = '';
+    let ws = null;
+    let reconnectTimeout = null;
+    let reconnectAttempts = 0;
+    let sseFallback = null;
+    let pingInterval = null;
+    let isAgentBusy = false;
+    let pendingApprovals = [];
+
+    // --- Init ---
+    window.addEventListener('DOMContentLoaded', () => {
+      // 1. Check for token in URL param (?token=xyz)
+      const urlParams = new URLSearchParams(window.location.search);
+      const paramToken = urlParams.get('token');
+      if (paramToken) {
+        token = paramToken;
+        localStorage.setItem('zed_token', token);
+        // Clean URL to avoid leaking token in history
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else {
+        token = localStorage.getItem('zed_token') || '';
+      }
+
+      // 2. Set share URL
+      const shareUrl = `${window.location.origin}/?token=${token}`;
+      document.getElementById('share-url-box').value = shareUrl;
+
+      // 3. Register Service Worker for PWA
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      }
+
+      if (!token) {
+        openSettingsModal();
+      } else {
+        initGatewayConnection();
+      }
+    });
+
+    // --- View Switching ---
+    function switchView(viewName) {
+      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+      const targetView = document.getElementById(`view-${viewName}`);
+      if (targetView) targetView.classList.add('active');
+
+      const navBtn = Array.from(document.querySelectorAll('.nav-item')).find(b => 
+        b.querySelector('span').innerText.toLowerCase() === viewName
+      );
+      if (navBtn) navBtn.classList.add('active');
+
+      // Refresh data on switch
+      if (viewName === 'files') {
+        loadWorkspaces();
+        loadFsDirectory(currentFsPath);
+      } else if (viewName === 'git') {
+        loadGitStatus();
+      } else if (viewName === 'system') {
+        loadTelemetry();
+      }
+    }
+
+    // --- Gateway API Fetcher ---
+    async function apiFetch(endpoint, options = {}) {
+      options.headers = options.headers || {};
+      options.headers['Authorization'] = `Bearer ${token}`;
+      if (!options.headers['Content-Type'] && options.method && options.method !== 'GET') {
+        options.headers['Content-Type'] = 'application/json';
+      }
+
+      try {
+        const res = await fetch(endpoint, options);
+        if (res.status === 401) {
+          updateConnectionStatus('error');
+          openSettingsModal();
+          return null;
+        }
+        return await res.json();
+      } catch (err) {
+        console.error(`API error on ${endpoint}:`, err);
+        return null;
+      }
+    }
+
+    // --- WebSocket Engine with Robust Fallback & Reconnection ---
+    function updateConnectionStatus(status) {
+      const dot = document.getElementById('status-dot');
+      const label = document.getElementById('status-label');
+      if (!dot || !label) return;
+
+      dot.className = 'status-dot';
+      if (status === 'connected') {
+        dot.classList.add('connected');
+        label.innerText = 'Online';
+        label.style.color = 'var(--success)';
+      } else if (status === 'connecting') {
+        dot.classList.add('connecting');
+        label.innerText = 'Connecting...';
+        label.style.color = 'var(--warning)';
+      } else if (status === 'reconnecting') {
+        dot.classList.add('connecting');
+        label.innerText = `Retry #${reconnectAttempts}`;
+        label.style.color = 'var(--warning)';
+      } else {
+        dot.classList.add('error');
+        label.innerText = 'Offline';
+        label.style.color = 'var(--danger)';
+      }
+    }
+
+    function reconnectNow() {
+      reconnectAttempts = 0;
+      clearTimeout(reconnectTimeout);
+      initGatewayConnection();
+    }
+
+    function initSseFallback() {
+      if (sseFallback) return;
+      try {
+        const sseUrl = `/v2/events?token=${encodeURIComponent(token)}`;
+        sseFallback = new EventSource(sseUrl);
+        sseFallback.onmessage = (event) => {
+          handleIncomingWsMessage(event.data);
+        };
+        sseFallback.onerror = () => {
+          if (sseFallback) {
+            sseFallback.close();
+            sseFallback = null;
+          }
+        };
+      } catch (e) {
+        console.error('SSE fallback init error:', e);
+      }
+    }
+
+    function initGatewayConnection() {
+      if (ws) {
+        try { ws.close(); } catch(e) {}
+      }
+      clearInterval(pingInterval);
+
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${proto}//${window.location.host}/ws?token=${encodeURIComponent(token)}`;
+
+      updateConnectionStatus(reconnectAttempts > 0 ? 'reconnecting' : 'connecting');
+
+      try {
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          reconnectAttempts = 0;
+          updateConnectionStatus('connected');
+          if (sseFallback) {
+            sseFallback.close();
+            sseFallback = null;
+          }
+
+          // Full state auto-synchronization upon connection/reconnection
+          loadThreadHistory(currentThreadId);
+          loadWorkspaces();
+          loadTelemetry();
+          loadPendingApprovals();
+
+          // Client keepalive ping every 25 seconds
+          pingInterval = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              try {
+                ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'ping' }));
+              } catch (_) {}
+            }
+          }, 25000);
+        };
+
+        ws.onmessage = (event) => {
+          handleIncomingWsMessage(event.data);
+        };
+
+        ws.onclose = () => {
+          clearInterval(pingInterval);
+          reconnectAttempts++;
+          const delay = Math.min(1000 * Math.pow(1.5, Math.min(reconnectAttempts - 1, 6)), 10000);
+          updateConnectionStatus('reconnecting');
+
+          if (reconnectAttempts >= 3 && !sseFallback) {
+            initSseFallback();
+          }
+
+          clearTimeout(reconnectTimeout);
+          reconnectTimeout = setTimeout(initGatewayConnection, delay);
+        };
+
+        ws.onerror = () => {
+          clearInterval(pingInterval);
+          updateConnectionStatus('error');
+        };
+      } catch (e) {
+        console.error('WebSocket init failed:', e);
+        updateConnectionStatus('error');
+        reconnectAttempts++;
+        const delay = Math.min(1000 * Math.pow(1.5, Math.min(reconnectAttempts - 1, 6)), 10000);
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = setTimeout(initGatewayConnection, delay);
+      }
+    }
+
+    // --- WebSocket Message Dispatcher ---
+    function handleIncomingWsMessage(raw) {
+      try {
+        const msg = JSON.parse(raw);
+
+        // 1. ACP Session Updates (Token streaming, reasoning thoughts)
+        if (msg.method === 'session/update') {
+          const update = msg.params && msg.params.update;
+          if (update) {
+            handleSessionUpdate(update);
+          }
+        }
+
+        // 2. Tool permission approval request
+        if (msg.method === 'session/request_permission') {
+          const params = msg.params || {};
+          showApprovalPrompt(msg.id, params.toolCall || params.tool_call, params.options || []);
+        }
+
+        // 3. Extension responses (terminal, git, etc.)
+        if (msg.result && msg.result.cwd) {
+          currentFsPath = msg.result.cwd;
+          updateWorkspaceTitle(msg.result.cwd);
+        }
+      } catch (e) {
+        // SSE formatted frame fallback
+        if (raw.startsWith('event: thread_question')) {
+          loadPendingApprovals();
+        }
+      }
+    }
+
+    // --- Agent Chat Handling ---
+    function handleSessionUpdate(update) {
+      const type = update.sessionUpdateType;
+
+      if (type === 'agent_message') {
+        const text = (update.content && update.content[0] && update.content[0].text) || '';
+        appendAssistantChunk(text);
+      } else if (type === 'thought') {
+        const thought = (update.content && update.content[0] && update.content[0].text) || '';
+        appendThoughtChunk(thought);
+      }
+    }
+
+    let activeAssistantMsgEl = null;
+    let activeThoughtEl = null;
+
+    function appendAssistantChunk(chunk) {
+      if (!activeAssistantMsgEl) {
+        activeAssistantMsgEl = document.createElement('div');
+        activeAssistantMsgEl.className = 'msg-bubble assistant';
+        document.getElementById('chat-messages').appendChild(activeAssistantMsgEl);
+      }
+      activeAssistantMsgEl.innerHTML += formatMarkdown(chunk);
+      scrollChatToBottom();
+    }
+
+    function appendThoughtChunk(thoughtChunk) {
+      if (!activeThoughtEl) {
+        const thoughtCard = document.createElement('details');
+        thoughtCard.className = 'thought-card';
+        thoughtCard.open = true;
+        thoughtCard.innerHTML = `<summary>🧠 Deliberating...</summary><div class="thought-body"></div>`;
+        document.getElementById('chat-messages').appendChild(thoughtCard);
+        activeThoughtEl = thoughtCard.querySelector('.thought-body');
+      }
+      activeThoughtEl.innerText += thoughtChunk;
+      scrollChatToBottom();
+    }
+
+    async function sendPrompt() {
+      const input = document.getElementById('prompt-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      // Render user prompt bubble
+      const userBubble = document.createElement('div');
+      userBubble.className = 'msg-bubble user';
+      userBubble.innerText = text;
+      document.getElementById('chat-messages').appendChild(userBubble);
+
+      input.value = '';
+      autoExpandTextarea(input);
+      scrollChatToBottom();
+
+      // Reset chunk pointers
+      activeAssistantMsgEl = null;
+      activeThoughtEl = null;
+
+      // Transmit to daemon
+      const payload = {
+        text: text,
+        prompt: text
+      };
+      await apiFetch(`/v2/threads/${encodeURIComponent(currentThreadId)}/messages`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+    }
+
+    function scrollChatToBottom() {
+      const box = document.getElementById('chat-messages');
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function autoExpandTextarea(el) {
+      el.style.height = 'auto';
+      el.style.height = (el.scrollHeight) + 'px';
+    }
+
+    function handleChatKey(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendPrompt();
+      }
+    }
+
+    // --- Tool Approvals ---
+    function showApprovalPrompt(rpcId, toolCall, options) {
+      const container = document.getElementById('approvals-container');
+      const toolName = (toolCall && toolCall.name) || 'terminal/exec';
+      const cmd = (toolCall && toolCall.parameters && toolCall.parameters.command) || 
+                  (toolCall && toolCall.parameters && toolCall.parameters.path) || 
+                  JSON.stringify(toolCall && toolCall.parameters);
+
+      const card = document.createElement('div');
+      card.className = 'approval-card';
+      card.id = `approval-${rpcId}`;
+      card.innerHTML = `
+        <div class="approval-header">
+          <span>⚠️ TOOL APPROVAL REQUEST</span>
+          <span style="font-family:var(--font-mono);">${toolName}</span>
+        </div>
+        <div class="approval-cmd">${escapeHtml(cmd)}</div>
+        <div class="approval-actions">
+          <button class="btn btn-danger btn-sm" onclick="resolveApproval('${rpcId}', 'reject')">Deny</button>
+          <button class="btn btn-success btn-sm" onclick="resolveApproval('${rpcId}', 'allow_once')">Approve (Run)</button>
+        </div>
+      `;
+      container.appendChild(card);
+      scrollChatToBottom();
+    }
+
+    async function resolveApproval(rpcId, decision) {
+      const card = document.getElementById(`approval-${rpcId}`);
+      if (card) card.remove();
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        const reply = {
+          jsonrpc: '2.0',
+          id: rpcId,
+          result: {
+            decision: decision,
+            outcome: {
+              outcome: decision === 'allow_once' ? 'selected' : 'rejected',
+              optionId: decision
+            }
+          }
+        };
+        ws.send(JSON.stringify(reply));
+      }
+    }
+
+    // --- Workspaces & Files Explorer ---
+    async function loadWorkspaces() {
+      const data = await apiFetch('/v2/projects/catalog');
+      if (!data || !data.projects) return;
+
+      const container = document.getElementById('open-workspaces-list');
+      container.innerHTML = '';
+
+      data.projects.forEach(p => {
+        const card = document.createElement('div');
+        card.className = `workspace-card ${p.is_open ? 'active' : ''}`;
+        card.innerHTML = `
+          <div style="font-weight:600; font-size:13px; color:var(--text);">${escapeHtml(p.name)}</div>
+          <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono); overflow:hidden; text-overflow:ellipsis;">${escapeHtml(p.path)}</div>
+          <div style="display:flex; justify-content:space-between; margin-top:4px;">
+            <span style="font-size:10px; color:${p.is_open ? 'var(--success)' : 'var(--text-muted)'};">${p.is_open ? '● In Zed' : 'Recent'}</span>
+            <button class="btn btn-outline btn-sm" style="padding:2px 6px;" onclick="openWorkspaceInZed('${escapeHtml(p.path)}')">Open</button>
+          </div>
+        `;
+        container.appendChild(card);
+
+        if (p.is_open && !currentFsPath) {
+          currentFsPath = p.path;
+          updateWorkspaceTitle(p.name);
+        }
+      });
+    }
+
+    async function openWorkspaceInZed(path) {
+      await apiFetch('/v2/projects/open', {
+        method: 'POST',
+        body: JSON.stringify({ path: path })
+      });
+      currentFsPath = path;
+      updateWorkspaceTitle(path);
+      loadFsDirectory(path);
+      loadGitStatus();
+    }
+
+    async function loadFsDirectory(targetPath) {
+      const url = targetPath ? `/v2/fs/list?path=${encodeURIComponent(targetPath)}` : '/v2/fs/list';
+      const data = await apiFetch(url);
+      if (!data) return;
+
+      currentFsPath = data.current_path;
+      document.getElementById('current-fs-path').innerText = currentFsPath;
+
+      const list = document.getElementById('files-list');
+      list.innerHTML = '';
+
+      const entries = data.entries || data.items || [];
+      entries.sort((a, b) => (b.is_dir - a.is_dir) || a.name.localeCompare(b.name));
+
+      entries.forEach(e => {
+        const item = document.createElement('div');
+        item.className = 'file-item';
+        item.innerHTML = `
+          <div class="file-item-left" onclick="onFileEntryClick('${escapeHtml(e.path)}', ${e.is_dir})">
+            <span>${e.is_dir ? '📁' : '📄'}</span>
+            <span style="${e.is_dir ? 'font-weight:600; color:var(--primary);' : ''}">${escapeHtml(e.name)}</span>
+          </div>
+          <div class="file-item-actions">
+            ${e.is_dir ? `<button class="btn btn-outline btn-sm" onclick="openWorkspaceInZed('${escapeHtml(e.path)}')">Zed</button>` : ''}
+          </div>
+        `;
+        list.appendChild(item);
+      });
+    }
+
+    function onFileEntryClick(path, isDir) {
+      if (isDir) {
+        loadFsDirectory(path);
+      }
+    }
+
+    function navigateFsUp() {
+      if (!currentFsPath || currentFsPath === '/') return;
+      const parts = currentFsPath.split('/').filter(Boolean);
+      parts.pop();
+      const parent = '/' + parts.join('/');
+      loadFsDirectory(parent || '/');
+    }
+
+    function updateWorkspaceTitle(pathOrName) {
+      const name = pathOrName.split('/').filter(Boolean).pop() || pathOrName;
+      document.getElementById('current-workspace-name').innerText = name;
+    }
+
+    // --- Git Controls ---
+    async function loadGitStatus() {
+      const status = await apiFetch('/v2/git/status');
+      if (!status) return;
+
+      document.getElementById('git-branch-name').innerText = status.current_branch || 'main';
+
+      const stagedList = document.getElementById('git-staged-list');
+      const unstagedList = document.getElementById('git-unstaged-list');
+
+      document.getElementById('git-staged-count').innerText = (status.staged || []).length;
+      document.getElementById('git-unstaged-count').innerText = ((status.modified || []).length + (status.untracked || []).length);
+
+      stagedList.innerHTML = '';
+      if ((status.staged || []).length === 0) {
+        stagedList.innerHTML = '<span style="color:var(--text-muted);font-size:12px;">No staged changes</span>';
+      } else {
+        status.staged.forEach(f => {
+          stagedList.innerHTML += `<div class="git-file-row"><span style="color:var(--success);">✓ ${escapeHtml(f)}</span></div>`;
+        });
+      }
+
+      unstagedList.innerHTML = '';
+      const changed = [...(status.modified || []), ...(status.untracked || [])];
+      if (changed.length === 0) {
+        unstagedList.innerHTML = '<span style="color:var(--text-muted);font-size:12px;">Working directory clean</span>';
+      } else {
+        changed.forEach(f => {
+          unstagedList.innerHTML += `
+            <div class="git-file-row">
+              <span>● ${escapeHtml(f)}</span>
+              <button class="btn btn-outline btn-sm" onclick="stageSingleFile('${escapeHtml(f)}')">+ Stage</button>
+            </div>
+          `;
+        });
+      }
+    }
+
+    async function stageSingleFile(path) {
+      await apiFetch('/v2/git/stage', {
+        method: 'POST',
+        body: JSON.stringify({ paths: [path] })
+      });
+      loadGitStatus();
+    }
+
+    async function stageAllGitFiles() {
+      const status = await apiFetch('/v2/git/status');
+      if (!status) return;
+      const allPaths = [...(status.modified || []), ...(status.untracked || [])];
+      if (allPaths.length > 0) {
+        await apiFetch('/v2/git/stage', {
+          method: 'POST',
+          body: JSON.stringify({ paths: allPaths })
+        });
+        loadGitStatus();
+      }
+    }
+
+    async function gitCommit() {
+      const msg = document.getElementById('git-commit-msg').value.trim();
+      if (!msg) {
+        alert('Please enter a commit message.');
+        return;
+      }
+      const res = await apiFetch('/v2/git/commit', {
+        method: 'POST',
+        body: JSON.stringify({ message: msg })
+      });
+      if (res) {
+        document.getElementById('git-commit-msg').value = '';
+        loadGitStatus();
+      }
+    }
+
+    async function gitPush() {
+      const res = await apiFetch('/v2/git/push', {
+        method: 'POST',
+        body: JSON.stringify({ remote: 'origin' })
+      });
+      if (res) {
+        alert('Pushed successfully to remote!');
+        loadGitStatus();
+      }
+    }
+
+    // --- Interactive Terminal ---
+    async function runTerminalCommand() {
+      const input = document.getElementById('terminal-input');
+      const cmd = input.value.trim();
+      if (!cmd) return;
+
+      appendTerminalOutput(`$ ${cmd}\n`);
+      input.value = '';
+
+      const res = await apiFetch('/v2/terminal/exec', {
+        method: 'POST',
+        body: JSON.stringify({ command: cmd })
+      });
+
+      if (res) {
+        if (res.stdout) appendTerminalOutput(res.stdout);
+        if (res.stderr) appendTerminalOutput(res.stderr);
+        if (res.cwd) currentFsPath = res.cwd;
+      }
+    }
+
+    function appendTerminalOutput(text) {
+      const term = document.getElementById('terminal-output');
+      term.innerText += text;
+      term.scrollTop = term.scrollHeight;
+    }
+
+    function insertQuickKey(key) {
+      const input = document.getElementById('terminal-input');
+      if (key === 'TAB') {
+        input.value += '  ';
+      } else if (key === 'Ctrl+C') {
+        appendTerminalOutput('^C\n');
+      } else if (key.endsWith('\n')) {
+        input.value = key.trim();
+        runTerminalCommand();
+      } else {
+        input.value += key;
+      }
+      input.focus();
+    }
+
+    function handleTerminalKey(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        runTerminalCommand();
+      }
+    }
+
+    // --- Telemetry & System ---
+    async function loadTelemetry() {
+      const data = await apiFetch('/v2/status');
+      if (data) {
+        document.getElementById('tele-status').innerText = 'Ready';
+      }
+    }
+
+    function copyShareUrl() {
+      const box = document.getElementById('share-url-box');
+      box.select();
+      navigator.clipboard.writeText(box.value);
+      alert('Pairing URL copied! Open it in your mobile browser.');
+    }
+
+    // --- Thread Management ---
+    async function loadThreadHistory(threadId) {
+      const data = await apiFetch(`/v2/threads/${threadId}`);
+      if (!data) return;
+
+      const container = document.getElementById('chat-messages');
+      container.innerHTML = '';
+
+      const msgs = data.messages || [];
+      msgs.forEach(m => {
+        const b = document.createElement('div');
+        b.className = `msg-bubble ${m.role === 'user' ? 'user' : 'assistant'}`;
+        b.innerHTML = m.role === 'user' ? escapeHtml(m.text) : formatMarkdown(m.text);
+        container.appendChild(b);
+      });
+      scrollChatToBottom();
+    }
+
+    function toggleYoloMode() {
+      const pill = document.getElementById('mode-toggle-btn');
+      const isYolo = pill.classList.contains('yolo');
+      if (isYolo) {
+        pill.classList.remove('yolo');
+        pill.innerText = 'Safe';
+      } else {
+        pill.classList.add('yolo');
+        pill.innerText = 'YOLO';
+      }
+    }
+
+    // --- Helpers ---
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function formatMarkdown(text) {
+      if (!text) return '';
+      let escaped = escapeHtml(text);
+      // Code blocks
+      escaped = escaped.replace(/```([a-zA-Z]*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+      // Inline code
+      escaped = escaped.replace(/`([^`]+)`/g, '<code style="background:var(--code-bg);padding:2px 4px;border-radius:4px;font-family:var(--font-mono);font-size:12px;">$1</code>');
+      // Bold
+      escaped = escaped.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+      // Linebreaks
+      escaped = escaped.replace(/\n/g, '<br>');
+      return escaped;
+    }
+
+    function openSettingsModal() {
+      document.getElementById('token-input').value = token;
+      document.getElementById('settings-modal').classList.add('active');
+    }
+
+    function closeSettingsModal() {
+      document.getElementById('settings-modal').classList.remove('active');
+    }
+
+    function saveTokenAndReconnect() {
+      const val = document.getElementById('token-input').value.trim();
+      if (val) {
+        token = val;
+        localStorage.setItem('zed_token', token);
+        document.getElementById('share-url-box').value = `${window.location.origin}/?token=${token}`;
+        closeSettingsModal();
+        initGatewayConnection();
+      }
+    }
+  </script>
+</body>
+</html>

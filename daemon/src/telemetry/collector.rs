@@ -134,7 +134,9 @@ impl TelemetryCollector {
             } else {
                 Err(DaemonError::Telemetry(format!(
                     "Command {} {:?} failed with exit code {:?}",
-                    cmd, args, status.code()
+                    cmd,
+                    args,
+                    status.code()
                 )))
             }
         }
@@ -143,10 +145,7 @@ impl TelemetryCollector {
         {
             let (cmd, args): (&str, &[&str]) = match action {
                 PowerAction::Sleep => ("pmset", &["sleepnow"]),
-                PowerAction::Lock => (
-                    "pmset",
-                    &["displaysleepnow"],
-                ),
+                PowerAction::Lock => ("pmset", &["displaysleepnow"]),
                 PowerAction::Shutdown => ("shutdown", &["-h", "now"]),
                 PowerAction::Reboot => ("shutdown", &["-r", "now"]),
             };
@@ -164,14 +163,19 @@ impl TelemetryCollector {
             } else {
                 Err(DaemonError::Telemetry(format!(
                     "Command {} {:?} failed with exit code {:?}",
-                    cmd, args, status.code()
+                    cmd,
+                    args,
+                    status.code()
                 )))
             }
         }
 
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
-            warn!("Power action {:?} unsupported on this operating system", action);
+            warn!(
+                "Power action {:?} unsupported on this operating system",
+                action
+            );
             Ok(PowerActionResult {
                 acknowledged: false,
                 message: "Unsupported operating system for power actions".to_string(),

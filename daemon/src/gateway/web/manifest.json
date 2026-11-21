@@ -1,0 +1,18 @@
+{
+  "name": "Zed Remote",
+  "short_name": "ZedRemote",
+  "description": "Mobile Controller & Agent Bridge for Zed Workspaces",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#14161b",
+  "theme_color": "#087ea4",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

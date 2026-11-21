@@ -22,6 +22,7 @@ app/android/gradlew
 app/android/gradlew.bat
 app/android/local.properties
 app/android/app/build/
+app/pubspec.lock
 **/*.pub-cache/
 
 # Android Jetpack Compose Build Artifacts

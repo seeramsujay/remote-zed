@@ -98,9 +98,7 @@ impl TerminalManager {
         // Tell desktop Zed GUI to open this workspace folder if zed is in PATH
         let path_for_zed = canonical.clone();
         tokio::spawn(async move {
-            let _ = Command::new("zed")
-                .arg(&path_for_zed)
-                .spawn();
+            let _ = Command::new("zed").arg(&path_for_zed).spawn();
         });
 
         Ok(canonical.to_string_lossy().to_string())
@@ -200,6 +198,14 @@ impl TerminalManager {
                 format!("Path {:?} not found: {}", target_path, e),
             ))
         })?;
+
+        // Protect host credentials and sensitive system directories from remote listing
+        if SecurityGuard::is_sensitive_path(&canonical) {
+            return Err(DaemonError::Security(format!(
+                "Directory {:?} contains protected system credentials and cannot be listed",
+                canonical
+            )));
+        }
 
         let mut entries = Vec::new();
         let mut dir_reader = read_dir(&canonical).await?;

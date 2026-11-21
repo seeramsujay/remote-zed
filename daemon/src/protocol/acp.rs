@@ -49,26 +49,18 @@ pub struct PromptParams {
 #[serde(tag = "sessionUpdateType")]
 pub enum SessionUpdatePayload {
     #[serde(rename = "agent_message_chunk")]
-    AgentMessageChunk {
-        content: TextChunk,
-    },
+    AgentMessageChunk { content: TextChunk },
     #[serde(rename = "agent_thought_chunk")]
-    AgentThoughtChunk {
-        content: TextChunk,
-    },
+    AgentThoughtChunk { content: TextChunk },
     #[serde(rename = "tool_call_started")]
-    ToolCallStarted {
-        tool_call: ToolCallDescriptor,
-    },
+    ToolCallStarted { tool_call: ToolCallDescriptor },
     #[serde(rename = "tool_call_completed")]
     ToolCallCompleted {
         tool_call_id: String,
         result: serde_json::Value,
     },
     #[serde(rename = "turn_completed")]
-    TurnCompleted {
-        stop_reason: Option<String>,
-    },
+    TurnCompleted { stop_reason: Option<String> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

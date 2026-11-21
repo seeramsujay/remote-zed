@@ -37,17 +37,28 @@ async fn main() -> anyhow::Result<()> {
     let workspace_root = config.resolve_workspace_root();
 
     let bind_addr: SocketAddr = format!("{}:{}", config.bind_host, config.port).parse()?;
-    info!("Target agent: {} {}", config.target_command, config.target_args);
+    info!(
+        "Target agent: {} {}",
+        config.target_command, config.target_args
+    );
     info!("Workspace root: {:?}", workspace_root);
     info!("Session logs: {:?}", session_dir);
+    info!("Gateway listening on http://{}", bind_addr);
+    info!(
+        "OpenCode Mobile Web Bridge (Fallback): http://{}/?token={}",
+        bind_addr, token
+    );
 
     // Initialize subsystems
     let session_manager = SessionManager::new(session_dir);
     let security = SecurityGuard::new(workspace_root.clone(), config.blocked_commands.clone());
     let git = GitEngine::new(workspace_root.clone());
     let telemetry = Arc::new(TelemetryCollector::new());
-    let terminal = Arc::new(TerminalManager::new(workspace_root.clone(), security.clone()));
-    let auth = AuthValidator::new(token);
+    let terminal = Arc::new(TerminalManager::new(
+        workspace_root.clone(),
+        security.clone(),
+    ));
+    let auth = AuthValidator::new(token.clone());
 
     // Spawn child agent process
     let mut agent_proc = AgentSubprocess::spawn(&config.target_command, &config.target_args)?;
