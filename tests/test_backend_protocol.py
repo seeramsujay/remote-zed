@@ -756,5 +756,48 @@ class TestTranscriptPaginationAndPromptRouting(unittest.TestCase):
         self.assertEqual(resolved_explicit, "custom-thread-id")
 
 
+class TestWebPwaAssets(unittest.TestCase):
+    """Verifies that the OpenCode-style Web Bridge & PWA static assets are intact and valid."""
+
+    def setUp(self):
+        self.web_dir = REPO_ROOT / "daemon" / "src" / "gateway" / "web"
+
+    def test_pwa_manifest_validity(self):
+        manifest_path = self.web_dir / "manifest.json"
+        self.assertTrue(manifest_path.exists(), "manifest.json must exist in daemon/src/gateway/web/")
+        with open(manifest_path, "r") as f:
+            data = json.load(f)
+        self.assertEqual(data.get("name"), "Zed Remote")
+        self.assertEqual(data.get("display"), "standalone")
+        self.assertEqual(data.get("start_url"), "/")
+        self.assertIn("icons", data)
+
+    def test_service_worker_exists(self):
+        sw_path = self.web_dir / "sw.js"
+        self.assertTrue(sw_path.exists(), "sw.js must exist in daemon/src/gateway/web/")
+        content = sw_path.read_text()
+        self.assertIn("addEventListener('install'", content)
+        self.assertIn("addEventListener('fetch'", content)
+
+    def test_index_html_features(self):
+        index_path = self.web_dir / "index.html"
+        self.assertTrue(index_path.exists(), "index.html must exist in daemon/src/gateway/web/")
+        content = index_path.read_text()
+        self.assertIn("<title>Zed Remote</title>", content)
+        self.assertIn("manifest.json", content)
+        self.assertIn("view-chat", content)
+        self.assertIn("view-files", content)
+        self.assertIn("view-git", content)
+        self.assertIn("view-terminal", content)
+        self.assertIn("view-system", content)
+        self.assertIn("serviceWorker", content)
+
+    def test_logo_svg_exists(self):
+        logo_path = self.web_dir / "logo.svg"
+        self.assertTrue(logo_path.exists(), "logo.svg must exist in daemon/src/gateway/web/")
+        content = logo_path.read_text()
+        self.assertTrue(content.startswith("<svg"), "logo.svg must be an SVG file")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

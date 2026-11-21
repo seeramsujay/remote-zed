@@ -270,6 +270,7 @@ impl WebSocketGateway {
     pub async fn run(&self) -> Result<()> {
         let listener = TcpListener::bind(self.bind_addr).await?;
         info!("WebSocket gateway listening on ws://{}", self.bind_addr);
+        info!("📱 OpenCode-style Mobile Web Bridge active at http://{}/?token={}", self.bind_addr, self.auth.token());
 
         loop {
             match listener.accept().await {
@@ -795,6 +796,51 @@ impl WebSocketGateway {
         if method == "OPTIONS" {
             let resp = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type, Accept\r\nContent-Length: 0\r\n\r\n";
             let _ = stream.write_all(resp.as_bytes()).await;
+            return Ok(());
+        }
+
+        // Serve OpenCode-style Mobile Web Bridge (PWA) static assets
+        if path == "/" || path == "/index.html" {
+            let html_content = include_str!("web/index.html");
+            let resp_headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-cache\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                html_content.len()
+            );
+            let _ = stream.write_all(resp_headers.as_bytes()).await;
+            let _ = stream.write_all(html_content.as_bytes()).await;
+            return Ok(());
+        }
+
+        if path == "/manifest.json" {
+            let manifest = include_str!("web/manifest.json");
+            let resp_headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/manifest+json\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: public, max-age=86400\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                manifest.len()
+            );
+            let _ = stream.write_all(resp_headers.as_bytes()).await;
+            let _ = stream.write_all(manifest.as_bytes()).await;
+            return Ok(());
+        }
+
+        if path == "/sw.js" {
+            let sw = include_str!("web/sw.js");
+            let resp_headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-cache\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                sw.len()
+            );
+            let _ = stream.write_all(resp_headers.as_bytes()).await;
+            let _ = stream.write_all(sw.as_bytes()).await;
+            return Ok(());
+        }
+
+        if path == "/logo.svg" || path == "/favicon.ico" {
+            let logo = include_str!("web/logo.svg");
+            let resp_headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: image/svg+xml\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: public, max-age=86400\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                logo.len()
+            );
+            let _ = stream.write_all(resp_headers.as_bytes()).await;
+            let _ = stream.write_all(logo.as_bytes()).await;
             return Ok(());
         }
 
