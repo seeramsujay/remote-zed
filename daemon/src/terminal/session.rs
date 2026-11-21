@@ -98,9 +98,7 @@ impl TerminalManager {
         // Tell desktop Zed GUI to open this workspace folder if zed is in PATH
         let path_for_zed = canonical.clone();
         tokio::spawn(async move {
-            let _ = Command::new("zed")
-                .arg(&path_for_zed)
-                .spawn();
+            let _ = Command::new("zed").arg(&path_for_zed).spawn();
         });
 
         Ok(canonical.to_string_lossy().to_string())

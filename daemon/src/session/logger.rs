@@ -58,7 +58,9 @@ impl SessionLogger {
                         while let Ok(Some(line)) = reader.next_line().await {
                             let trimmed = line.trim();
                             if !trimmed.is_empty() {
-                                if let Ok(entry) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                                if let Ok(entry) =
+                                    serde_json::from_str::<serde_json::Value>(trimmed)
+                                {
                                     if let Some(s) = entry.get("seq").and_then(|v| v.as_u64()) {
                                         initial_seq = s;
                                     }
@@ -110,7 +112,10 @@ impl SessionLogger {
                 }
             }
             Err(e) => {
-                error!("Failed to serialize session log entry for session {}: {}", self.session_id, e);
+                error!(
+                    "Failed to serialize session log entry for session {}: {}",
+                    self.session_id, e
+                );
             }
         }
 

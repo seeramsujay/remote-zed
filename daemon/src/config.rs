@@ -40,39 +40,23 @@ pub struct Config {
     pub bind_host: String,
 
     /// Port to listen on for WebSocket connections from the mobile app.
-    #[arg(
-        long = "port",
-        env = "ZED_REMOTE_PORT",
-        default_value = "8443"
-    )]
+    #[arg(long = "port", env = "ZED_REMOTE_PORT", default_value = "8443")]
     pub port: u16,
 
     /// Optional path to a file containing the pre-shared secret bearer token.
-    #[arg(
-        long = "token-file",
-        env = "ZED_REMOTE_TOKEN_FILE"
-    )]
+    #[arg(long = "token-file", env = "ZED_REMOTE_TOKEN_FILE")]
     pub token_file: Option<PathBuf>,
 
     /// Secret authentication bearer token provided directly via CLI or environment variable.
-    #[arg(
-        long = "auth-token",
-        env = "ZED_REMOTE_AUTH_TOKEN"
-    )]
+    #[arg(long = "auth-token", env = "ZED_REMOTE_AUTH_TOKEN")]
     pub auth_token: Option<String>,
 
     /// Directory used to persist rolling `.jsonl` session transaction logs.
-    #[arg(
-        long = "session-dir",
-        env = "ZED_REMOTE_SESSION_DIR"
-    )]
+    #[arg(long = "session-dir", env = "ZED_REMOTE_SESSION_DIR")]
     pub session_dir: Option<PathBuf>,
 
     /// Root directory of the repository or active project workspace.
-    #[arg(
-        long = "workspace-root",
-        env = "ZED_REMOTE_WORKSPACE_ROOT"
-    )]
+    #[arg(long = "workspace-root", env = "ZED_REMOTE_WORKSPACE_ROOT")]
     pub workspace_root: Option<PathBuf>,
 
     /// Blocklist of prohibited shell command substrings.
@@ -112,7 +96,10 @@ impl Config {
 
         // Default or fallback: generate a random uuid token and notify the user
         let generated = uuid::Uuid::new_v4().to_string();
-        info!("No auth token provided. Generated ephemeral token: {}", generated);
+        info!(
+            "No auth token provided. Generated ephemeral token: {}",
+            generated
+        );
         generated
     }
 

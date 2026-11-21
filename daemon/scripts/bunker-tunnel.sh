@@ -461,7 +461,17 @@ encoded = base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip('=
 print('ZEDBUNKER:' + encoded)
 ")
 
-    echo -e "${YELLOW}${BOLD}📱 SCAN THIS QR CODE IN ZED REMOTE APP (ONE-TIME PAIRING):${NC}"
+    LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    if [[ -z "${LOCAL_IP}" ]]; then
+        LOCAL_IP="127.0.0.1"
+    fi
+    WEB_BRIDGE_URL="http://${LOCAL_IP}:${LOCAL_PORT}/?token=${TOKEN}"
+
+    echo -e "${CYAN}${BOLD}======================================================================${NC}"
+    echo -e "${YELLOW}${BOLD}🚀 DUAL-ENGINE ACCESS: NATIVE APP OR OPENCODE WEB PWA${NC}"
+    echo -e "${CYAN}${BOLD}======================================================================${NC}"
+    echo -e "${WHITE}${BOLD}[METHOD 1 - Primary] Native Android Companion App${NC}"
+    echo -e "📱 Scan this QR code in the Remote Zed Android App (one-time pairing):"
     echo "----------------------------------------------------------------------"
     python3 -c "
 import qrcode
@@ -471,10 +481,22 @@ qr.make(fit=True)
 qr.print_ascii(invert=True)
 " 2>/dev/null || echo -e "Install 'qrcode' for ASCII QR rendering: pip install qrcode"
     echo "----------------------------------------------------------------------"
-    echo -e "Pairing Payload: ${CYAN}${QR_PAYLOAD}${NC}"
-    echo -e "${GREEN}[✓] Device paired! Future runs of 'zed-tunnel' will not require scanning again.${NC}"
-    echo "----------------------------------------------------------------------"
+    echo -e "Native App Pairing Payload: ${CYAN}${QR_PAYLOAD}${NC}"
     echo ""
+    echo -e "${WHITE}${BOLD}[METHOD 2 - Fallback] OpenCode Mobile Web Bridge (PWA)${NC}"
+    echo -e "🌐 Open in ANY browser on your phone or install as a PWA (Zero-Config):"
+    echo -e "   URL: ${GREEN}${BOLD}${WEB_BRIDGE_URL}${NC}"
+    echo "----------------------------------------------------------------------"
+    python3 -c "
+import qrcode
+qr = qrcode.QRCode(border=1)
+qr.add_data('${WEB_BRIDGE_URL}')
+qr.make(fit=True)
+qr.print_ascii(invert=True)
+" 2>/dev/null || true
+    echo "----------------------------------------------------------------------"
+    echo -e "${GREEN}[✓] Dual-engine active! Use native app or Web PWA as fallback anytime.${NC}"
+    echo -e "${CYAN}${BOLD}======================================================================${NC}\n"
 fi
 
 encrypt_and_publish() {

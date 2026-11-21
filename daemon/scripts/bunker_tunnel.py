@@ -14,6 +14,7 @@ import os
 import re
 import secrets
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -125,8 +126,20 @@ def render_terminal_qr(pairing_uri: str):
     print("=" * 60 + "\n")
 
 
+def get_local_ip() -> str:
+    """Discovers host LAN IP address."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
 def cmd_pair(args):
-    """Generates credentials and displays the terminal pairing QR code."""
+    """Generates credentials and displays dual-engine pairing options."""
     config = generate_bunker_keys()
     if args.port:
         config["local_port"] = args.port
@@ -143,7 +156,22 @@ def cmd_pair(args):
         f"port={config['local_port']}"
     )
 
+    local_ip = get_local_ip()
+    web_bridge_url = f"http://{local_ip}:{config['local_port']}/?token={config['daemon_token']}"
+
+    print("\n" + "=" * 60)
+    print("   [METHOD 1 - Primary] NATIVE ANDROID COMPANION APP")
+    print("=" * 60)
     render_terminal_qr(pairing_uri)
+    print(f"Pairing URI: {pairing_uri}\n")
+
+    print("=" * 60)
+    print("   [METHOD 2 - Fallback] OPENCODE MOBILE WEB BRIDGE (PWA)")
+    print("=" * 60)
+    print("Open directly in ANY mobile browser (Chrome/Safari) or install as PWA:")
+    print(f"URL: {web_bridge_url}\n")
+    render_terminal_qr(web_bridge_url)
+
     print("[+] Pairing parameters generated successfully.")
     print(f"    - Ntfy Topic:       {config['ntfy_topic']}")
     print(
@@ -152,7 +180,8 @@ def cmd_pair(args):
     print(
         f"    - Daemon Token:     {config['daemon_token'][:8]}...{config['daemon_token'][-8:]}"
     )
-    print(f"    - Local Daemon Port:{config['local_port']}\n")
+    print(f"    - Local Daemon Port:{config['local_port']}")
+    print(f"    - Web Bridge URL:   {web_bridge_url}\n")
     print("[*] To start the bunker tunnel service, run:")
     print("    python3 daemon/scripts/bunker_tunnel.py run\n")
 

@@ -61,10 +61,7 @@ impl AuthValidator {
             let entry = lock.entry(ip).or_insert((0, Instant::now()));
             entry.0 += 1;
             entry.1 = Instant::now();
-            warn!(
-                "Failed auth attempt from {} (attempt {}/5)",
-                ip, entry.0
-            );
+            warn!("Failed auth attempt from {} (attempt {}/5)", ip, entry.0);
             if entry.0 >= 5 {
                 warn!("🚨 IP {} temporarily locked out for 15 minutes due to 5 consecutive auth failures", ip);
             }

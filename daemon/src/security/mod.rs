@@ -41,10 +41,7 @@ impl SecurityGuard {
         }
 
         // Initialize trusted roots with workspace root, /dev/shm, and ~/Projects
-        let mut initial_trusted = vec![
-            workspace_root.clone(),
-            PathBuf::from("/dev/shm"),
-        ];
+        let mut initial_trusted = vec![workspace_root.clone(), PathBuf::from("/dev/shm")];
 
         if let Ok(home) = std::env::var("HOME") {
             let projects = PathBuf::from(home).join("Projects");
@@ -65,7 +62,10 @@ impl SecurityGuard {
         let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
         let mut roots = self.trusted_roots.write().await;
         if !roots.contains(&canonical) {
-            info!("Phone explicitly trusted directory boundary: {:?}", canonical);
+            info!(
+                "Phone explicitly trusted directory boundary: {:?}",
+                canonical
+            );
             roots.push(canonical);
         }
     }
@@ -75,7 +75,10 @@ impl SecurityGuard {
         let normalized = command_str.to_lowercase();
         for blocked in &self.blocked_commands {
             if normalized.contains(&blocked.to_lowercase()) {
-                warn!("Blocked malicious command pattern: '{}' in '{}'", blocked, command_str);
+                warn!(
+                    "Blocked malicious command pattern: '{}' in '{}'",
+                    blocked, command_str
+                );
                 return Err(DaemonError::Security(format!(
                     "Command contains prohibited pattern '{}'",
                     blocked
@@ -119,7 +122,10 @@ impl SecurityGuard {
 
         // Strictly prohibit access to host secrets / sensitive credentials
         if Self::is_sensitive_path(&canonical_target) {
-            warn!("Rejected access to sensitive system path: {:?}", canonical_target);
+            warn!(
+                "Rejected access to sensitive system path: {:?}",
+                canonical_target
+            );
             return Err(DaemonError::Security(format!(
                 "Access to sensitive path {:?} is strictly prohibited",
                 target_path

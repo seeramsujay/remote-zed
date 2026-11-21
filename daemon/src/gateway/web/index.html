@@ -119,6 +119,25 @@
       gap: 6px;
     }
 
+    .connection-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.2s;
+    }
+
+    .connection-status:hover {
+      border-color: var(--primary);
+    }
+
     .status-dot {
       width: 8px;
       height: 8px;
@@ -129,11 +148,28 @@
 
     .status-dot.connected {
       background-color: var(--success);
-      box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+      box-shadow: 0 0 8px rgba(74, 222, 128, 0.6);
+    }
+
+    .status-dot.connecting {
+      background-color: var(--warning);
+      animation: status-pulse 1.2s infinite ease-in-out;
     }
 
     .status-dot.error {
       background-color: var(--danger);
+      box-shadow: 0 0 6px rgba(248, 113, 113, 0.6);
+    }
+
+    @keyframes status-pulse {
+      0%, 100% { opacity: 0.4; transform: scale(0.9); }
+      50% { opacity: 1; transform: scale(1.1); }
+    }
+
+    .status-label {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
     }
 
     .mode-pill {
@@ -833,7 +869,10 @@
 
     <div class="header-actions">
       <div class="mode-pill yolo" id="mode-toggle-btn" onclick="toggleYoloMode()">YOLO</div>
-      <div class="status-dot" id="status-dot" title="Connection status"></div>
+      <div class="connection-status" id="connection-status" onclick="reconnectNow()" title="Click to reconnect">
+        <div class="status-dot" id="status-dot"></div>
+        <span class="status-label" id="status-label">Online</span>
+      </div>
       <button class="icon-btn" onclick="openSettingsModal()" title="Auth & Pairing">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="3"></circle>
@@ -1047,6 +1086,9 @@ Type a command or tap quick keys below.
     let currentFsPath = '';
     let ws = null;
     let reconnectTimeout = null;
+    let reconnectAttempts = 0;
+    let sseFallback = null;
+    let pingInterval = null;
     let isAgentBusy = false;
     let pendingApprovals = [];
 
@@ -1126,25 +1168,93 @@ Type a command or tap quick keys below.
       }
     }
 
-    // --- WebSocket Engine ---
+    // --- WebSocket Engine with Robust Fallback & Reconnection ---
+    function updateConnectionStatus(status) {
+      const dot = document.getElementById('status-dot');
+      const label = document.getElementById('status-label');
+      if (!dot || !label) return;
+
+      dot.className = 'status-dot';
+      if (status === 'connected') {
+        dot.classList.add('connected');
+        label.innerText = 'Online';
+        label.style.color = 'var(--success)';
+      } else if (status === 'connecting') {
+        dot.classList.add('connecting');
+        label.innerText = 'Connecting...';
+        label.style.color = 'var(--warning)';
+      } else if (status === 'reconnecting') {
+        dot.classList.add('connecting');
+        label.innerText = `Retry #${reconnectAttempts}`;
+        label.style.color = 'var(--warning)';
+      } else {
+        dot.classList.add('error');
+        label.innerText = 'Offline';
+        label.style.color = 'var(--danger)';
+      }
+    }
+
+    function reconnectNow() {
+      reconnectAttempts = 0;
+      clearTimeout(reconnectTimeout);
+      initGatewayConnection();
+    }
+
+    function initSseFallback() {
+      if (sseFallback) return;
+      try {
+        const sseUrl = `/v2/events?token=${encodeURIComponent(token)}`;
+        sseFallback = new EventSource(sseUrl);
+        sseFallback.onmessage = (event) => {
+          handleIncomingWsMessage(event.data);
+        };
+        sseFallback.onerror = () => {
+          if (sseFallback) {
+            sseFallback.close();
+            sseFallback = null;
+          }
+        };
+      } catch (e) {
+        console.error('SSE fallback init error:', e);
+      }
+    }
+
     function initGatewayConnection() {
       if (ws) {
         try { ws.close(); } catch(e) {}
       }
+      clearInterval(pingInterval);
 
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${proto}//${window.location.host}/ws?token=${encodeURIComponent(token)}`;
 
-      updateConnectionStatus('connecting');
+      updateConnectionStatus(reconnectAttempts > 0 ? 'reconnecting' : 'connecting');
 
       try {
         ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
+          reconnectAttempts = 0;
           updateConnectionStatus('connected');
+          if (sseFallback) {
+            sseFallback.close();
+            sseFallback = null;
+          }
+
+          // Full state auto-synchronization upon connection/reconnection
           loadThreadHistory(currentThreadId);
           loadWorkspaces();
           loadTelemetry();
+          loadPendingApprovals();
+
+          // Client keepalive ping every 25 seconds
+          pingInterval = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              try {
+                ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'ping' }));
+              } catch (_) {}
+            }
+          }, 25000);
         };
 
         ws.onmessage = (event) => {
@@ -1152,25 +1262,31 @@ Type a command or tap quick keys below.
         };
 
         ws.onclose = () => {
-          updateConnectionStatus('error');
+          clearInterval(pingInterval);
+          reconnectAttempts++;
+          const delay = Math.min(1000 * Math.pow(1.5, Math.min(reconnectAttempts - 1, 6)), 10000);
+          updateConnectionStatus('reconnecting');
+
+          if (reconnectAttempts >= 3 && !sseFallback) {
+            initSseFallback();
+          }
+
           clearTimeout(reconnectTimeout);
-          reconnectTimeout = setTimeout(initGatewayConnection, 3000);
+          reconnectTimeout = setTimeout(initGatewayConnection, delay);
         };
 
         ws.onerror = () => {
+          clearInterval(pingInterval);
           updateConnectionStatus('error');
         };
       } catch (e) {
         console.error('WebSocket init failed:', e);
         updateConnectionStatus('error');
+        reconnectAttempts++;
+        const delay = Math.min(1000 * Math.pow(1.5, Math.min(reconnectAttempts - 1, 6)), 10000);
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = setTimeout(initGatewayConnection, delay);
       }
-    }
-
-    function updateConnectionStatus(status) {
-      const dot = document.getElementById('status-dot');
-      dot.className = 'status-dot';
-      if (status === 'connected') dot.classList.add('connected');
-      else if (status === 'error') dot.classList.add('error');
     }
 
     // --- WebSocket Message Dispatcher ---
@@ -1268,7 +1384,7 @@ Type a command or tap quick keys below.
         text: text,
         prompt: text
       };
-      await apiFetch(`/v2/threads/${currentThreadId}`, {
+      await apiFetch(`/v2/threads/${encodeURIComponent(currentThreadId)}/messages`, {
         method: 'POST',
         body: JSON.stringify(payload)
       });

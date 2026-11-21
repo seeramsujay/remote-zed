@@ -142,7 +142,10 @@ impl GitEngine {
 
     /// Returns detailed repository status including modified, staged, and untracked files.
     pub async fn status(&self) -> Result<GitStatusResult> {
-        let branch = self.current_branch().await.unwrap_or_else(|_| "HEAD".to_string());
+        let branch = self
+            .current_branch()
+            .await
+            .unwrap_or_else(|_| "HEAD".to_string());
         let raw_status = self.run_git(&["status", "--porcelain=v1", "-z"]).await?;
 
         let mut files = Vec::new();
@@ -159,7 +162,10 @@ impl GitEngine {
             let file_path = &token[3..];
 
             // In git status -z porcelain, rename (R) and copy (C) records put the new path first, then old path in the next token
-            let is_rename_or_copy = index_status == 'R' || worktree_status == 'R' || index_status == 'C' || worktree_status == 'C';
+            let is_rename_or_copy = index_status == 'R'
+                || worktree_status == 'R'
+                || index_status == 'C'
+                || worktree_status == 'C';
             let old_path = if is_rename_or_copy {
                 if idx < tokens.len() && !tokens[idx].is_empty() {
                     let p = tokens[idx].to_string();
@@ -210,7 +216,10 @@ impl GitEngine {
 
         let is_clean = files.is_empty();
 
-        let (ahead, behind) = match self.run_git(&["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]).await {
+        let (ahead, behind) = match self
+            .run_git(&["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
+            .await
+        {
             Ok(counts) => {
                 let parts: Vec<&str> = counts.split_whitespace().collect();
                 if parts.len() >= 2 {
@@ -289,7 +298,10 @@ impl GitEngine {
         self.run_git(&["commit", "-m", message]).await?;
 
         let hash_raw = self.run_git(&["rev-parse", "--short", "HEAD"]).await?;
-        let branch = self.current_branch().await.unwrap_or_else(|_| "HEAD".to_string());
+        let branch = self
+            .current_branch()
+            .await
+            .unwrap_or_else(|_| "HEAD".to_string());
 
         let commit_hash = hash_raw.trim().to_string();
         info!("Created commit {} on branch {}", commit_hash, branch);
@@ -303,12 +315,20 @@ impl GitEngine {
 
     /// Pushes committed changes to the upstream remote repository.
     pub async fn push(&self, remote: Option<&str>, branch: Option<&str>) -> Result<String> {
-        let current = self.current_branch().await.unwrap_or_else(|_| "main".to_string());
+        let current = self
+            .current_branch()
+            .await
+            .unwrap_or_else(|_| "main".to_string());
         let target_branch = branch.unwrap_or(&current);
         let target_remote = remote.unwrap_or("origin");
 
-        info!("Pushing branch {} to remote {}", target_branch, target_remote);
-        let out = self.run_git(&["push", target_remote, target_branch]).await?;
+        info!(
+            "Pushing branch {} to remote {}",
+            target_branch, target_remote
+        );
+        let out = self
+            .run_git(&["push", target_remote, target_branch])
+            .await?;
         Ok(out)
     }
 
@@ -335,7 +355,10 @@ impl GitEngine {
         if paths.is_empty() {
             return Ok(());
         }
-        let has_head = self.run_git(&["rev-parse", "--verify", "HEAD"]).await.is_ok();
+        let has_head = self
+            .run_git(&["rev-parse", "--verify", "HEAD"])
+            .await
+            .is_ok();
         let mut args = if has_head {
             vec!["restore", "--staged", "--"]
         } else {
@@ -364,7 +387,10 @@ impl GitEngine {
                 .trim_start_matches("remotes/")
                 .trim_start_matches("origin/");
             let local_ref = format!("refs/heads/{}", local_name);
-            let has_local = self.run_git(&["rev-parse", "--verify", &local_ref]).await.is_ok();
+            let has_local = self
+                .run_git(&["rev-parse", "--verify", &local_ref])
+                .await
+                .is_ok();
 
             if has_local {
                 let out = match self.run_git(&["switch", local_name]).await {
@@ -373,9 +399,15 @@ impl GitEngine {
                 };
                 return Ok(out);
             } else {
-                let out = match self.run_git(&["switch", "-c", local_name, "--track", clean_branch]).await {
+                let out = match self
+                    .run_git(&["switch", "-c", local_name, "--track", clean_branch])
+                    .await
+                {
                     Ok(o) => o,
-                    Err(_) => self.run_git(&["checkout", "-b", local_name, "--track", clean_branch]).await?,
+                    Err(_) => {
+                        self.run_git(&["checkout", "-b", local_name, "--track", clean_branch])
+                            .await?
+                    }
                 };
                 return Ok(out);
             }
@@ -391,7 +423,9 @@ impl GitEngine {
 
     /// Retrieves list of all local and remote branches.
     pub async fn branches(&self) -> Result<Vec<String>> {
-        let out = self.run_git(&["branch", "-a", "--format=%(refname:short)"]).await?;
+        let out = self
+            .run_git(&["branch", "-a", "--format=%(refname:short)"])
+            .await?;
         let mut list = Vec::new();
         for line in out.lines() {
             let trimmed = line.trim();
@@ -406,7 +440,11 @@ impl GitEngine {
     pub async fn log_graph(&self, limit: usize) -> Result<Vec<GitCommitInfo>> {
         let limit_str = format!("-n{}", limit.max(1));
         let out = self
-            .run_git(&["log", &limit_str, "--pretty=format:%h%x09%an%x09%ar%x09%d%x09%s"])
+            .run_git(&[
+                "log",
+                &limit_str,
+                "--pretty=format:%h%x09%an%x09%ar%x09%d%x09%s",
+            ])
             .await?;
 
         let mut commits = Vec::new();
