@@ -542,16 +542,29 @@ class TestBunkerTunnelSupervisor(unittest.TestCase):
         self.assertIn("--stop", res.stdout)
 
     def test_status_flag_output(self):
-        res = subprocess.run(
-            ["bash", str(self.script_path), "--status"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-        self.assertEqual(res.returncode, 0)
-        self.assertIn("Zed Remote Status:", res.stdout)
-        self.assertIn("Tunnel Process:", res.stdout)
+        for flag in ["--status", "status"]:
+            res = subprocess.run(
+                ["bash", str(self.script_path), flag],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            self.assertEqual(res.returncode, 0)
+            self.assertIn("Zed Remote Status:", res.stdout)
+            self.assertIn("Tunnel Process:", res.stdout)
+
+    def test_bind_subcommand_with_running_supervisor(self):
+        for cmd in ["--bind", "bind"]:
+            res = subprocess.run(
+                ["bash", str(self.script_path), cmd],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+            self.assertEqual(res.returncode, 0)
+            self.assertIn("ZEDBUNKER:", res.stdout)
 
     def test_supervisor_flock_and_cleanup_isolation(self):
         """Simulate supervisor locking, verifying no re-entrant cleanup and clean lock release."""
