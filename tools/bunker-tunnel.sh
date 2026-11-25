@@ -30,6 +30,7 @@ NC="\033[0m"
 CONFIG_DIR="${HOME}/.config/zed-remote"
 CONFIG_FILE="${CONFIG_DIR}/bunker-session.json"
 PID_FILE="${CONFIG_DIR}/zed-tunnel.pid"
+PORT_FILE="${CONFIG_DIR}/zed-tunnel.port"
 LOCK_FILE="${CONFIG_DIR}/zed-tunnel.lock"
 LOG_FILE="${CONFIG_DIR}/zed-pinggy.log"
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
@@ -247,6 +248,7 @@ SHOW_BIND_QR=false
 RESET_KEYS=false
 DAEMON_MODE=false
 LOCAL_PORT="8443"
+PORT_EXPLICIT=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -302,11 +304,13 @@ while [[ $# -gt 0 ]]; do
             ;;
         -p|--port)
             LOCAL_PORT="$2"
+            PORT_EXPLICIT=true
             shift 2
             ;;
         *)
             if [[ "$1" =~ ^[0-9]+$ ]]; then
                 LOCAL_PORT="$1"
+                PORT_EXPLICIT=true
                 shift
             else
                 echo -e "${RED}[!] Unknown option: $1${NC}"
@@ -421,7 +425,7 @@ cleanup() {
     fi
     pkill -f "tcp@.*pinggy\.io" 2>/dev/null || true
     if [[ "$HAS_LOCK" = true ]]; then
-        rm -f "${PID_FILE}"
+        rm -f "${PID_FILE}" "${PORT_FILE}"
         release_lock
     fi
     exit 0
@@ -448,6 +452,19 @@ EOF
         TOPIC=$(python3 -c "import json; d = json.load(open('${CONFIG_FILE}')); print(d.get('ntfy_topic', ''))")
         KEY_B64=$(python3 -c "import json; d = json.load(open('${CONFIG_FILE}')); print(d.get('key') or d.get('bunker_key', ''))")
         TOKEN=$(python3 -c "import json; d = json.load(open('${CONFIG_FILE}')); print(d.get('token') or d.get('daemon_token', ''))")
+        if [[ "$PORT_EXPLICIT" = false ]]; then
+            ACTIVE_PORT=""
+            if [[ -f "${PORT_FILE}" ]]; then
+                ACTIVE_PORT=$(tr -d '[:space:]' < "${PORT_FILE}")
+            fi
+            if [[ "${ACTIVE_PORT}" =~ ^[0-9]+$ ]]; then
+                LOCAL_PORT="${ACTIVE_PORT}"
+            else
+                echo -e "${RED}[!] Active supervisor port is unknown (missing ${PORT_FILE}).${NC}"
+                echo -e "${YELLOW}[*] Pass the active port explicitly, e.g.: zed-tunnel bind <PORT>${NC}"
+                exit 1
+            fi
+        fi
         echo -e "${GREEN}[✓] Loaded persistent device binding:${NC}"
         echo -e "    Channel Topic: ${CYAN}${TOPIC}${NC}"
         echo -e "    Target Port:   ${CYAN}${LOCAL_PORT}${NC}"
@@ -464,6 +481,7 @@ EOF
 fi
 HAS_LOCK=true
 echo $$ > "${PID_FILE}"
+echo "${LOCAL_PORT}" > "${PORT_FILE}"
 trap cleanup SIGINT SIGTERM EXIT
 
 if [[ "$DAEMON_MODE" = false ]]; then
