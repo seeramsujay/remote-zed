@@ -24,11 +24,13 @@ BLUE="\033[0;34m"
 YELLOW="\033[1;33m"
 CYAN="\033[0;36m"
 RED="\033[0;31m"
+WHITE="\033[1;37m"
 NC="\033[0m"
 
 CONFIG_DIR="${HOME}/.config/zed-remote"
 CONFIG_FILE="${CONFIG_DIR}/bunker-session.json"
 PID_FILE="${CONFIG_DIR}/zed-tunnel.pid"
+PORT_FILE="${CONFIG_DIR}/zed-tunnel.port"
 LOCK_FILE="${CONFIG_DIR}/zed-tunnel.lock"
 LOG_FILE="${CONFIG_DIR}/zed-pinggy.log"
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
@@ -246,31 +248,32 @@ SHOW_BIND_QR=false
 RESET_KEYS=false
 DAEMON_MODE=false
 LOCAL_PORT="8443"
+PORT_EXPLICIT=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -h|--help)
+        -h|--help|help)
             show_help
             ;;
-        -b|--bind)
+        -b|--bind|bind|qr|pair)
             SHOW_BIND_QR=true
             shift
             ;;
-        --reset)
+        --reset|reset)
             RESET_KEYS=true
             SHOW_BIND_QR=true
             shift
             ;;
-        -s|--status)
+        -s|--status|status)
             show_status
             ;;
-        --stop)
+        --stop|stop)
             stop_tunnel
             ;;
-        --service)
+        --service|service)
             manage_service "${2:-status}"
             ;;
-        -i|--inject)
+        -i|--inject|inject)
             INJECT_SCRIPT=""
             CANDIDATES=(
                 "$(dirname "$0")/inject-daemon.sh"
@@ -292,7 +295,7 @@ while [[ $# -gt 0 ]]; do
             fi
             exit 0
             ;;
-        -u|--update)
+        -u|--update|update)
             run_update
             ;;
         --daemon)
@@ -301,11 +304,13 @@ while [[ $# -gt 0 ]]; do
             ;;
         -p|--port)
             LOCAL_PORT="$2"
+            PORT_EXPLICIT=true
             shift 2
             ;;
         *)
             if [[ "$1" =~ ^[0-9]+$ ]]; then
                 LOCAL_PORT="$1"
+                PORT_EXPLICIT=true
                 shift
             else
                 echo -e "${RED}[!] Unknown option: $1${NC}"
@@ -315,6 +320,59 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+render_bind_qr() {
+    QR_PAYLOAD=$(python3 -c "
+import json, base64
+
+data = {
+    'version': 'bunker-v2',
+    'ntfy_topic': '${TOPIC}',
+    'key': '${KEY_B64}',
+    'token': '${TOKEN}',
+    'port': ${LOCAL_PORT}
+}
+encoded = base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip('=')
+print('ZEDBUNKER:' + encoded)
+")
+
+    LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    if [[ -z "${LOCAL_IP}" ]]; then
+        LOCAL_IP="127.0.0.1"
+    fi
+    WEB_BRIDGE_URL="http://${LOCAL_IP}:${LOCAL_PORT}/?token=${TOKEN}"
+
+    echo -e "${CYAN}${BOLD}======================================================================${NC}"
+    echo -e "${YELLOW}${BOLD}🚀 DUAL-ENGINE ACCESS: NATIVE APP OR OPENCODE WEB PWA${NC}"
+    echo -e "${CYAN}${BOLD}======================================================================${NC}"
+    echo -e "${WHITE}${BOLD}[METHOD 1 - Primary] Native Android Companion App${NC}"
+    echo -e "📱 Scan this QR code in the Remote Zed Android App (one-time pairing):"
+    echo "----------------------------------------------------------------------"
+    python3 -c "
+import qrcode
+qr = qrcode.QRCode(border=1)
+qr.add_data('${QR_PAYLOAD}')
+qr.make(fit=True)
+qr.print_ascii(invert=True)
+" 2>/dev/null || echo -e "Install 'qrcode' for ASCII QR rendering: pip install qrcode"
+    echo "----------------------------------------------------------------------"
+    echo -e "Native App Pairing Payload: ${CYAN}${QR_PAYLOAD}${NC}"
+    echo ""
+    echo -e "${WHITE}${BOLD}[METHOD 2 - Fallback] OpenCode Mobile Web Bridge (PWA)${NC}"
+    echo -e "🌐 Open in ANY browser on your phone or install as a PWA (Zero-Config):"
+    echo -e "   URL: ${GREEN}${BOLD}${WEB_BRIDGE_URL}${NC}"
+    echo "----------------------------------------------------------------------"
+    python3 -c "
+import qrcode
+qr = qrcode.QRCode(border=1)
+qr.add_data('${WEB_BRIDGE_URL}')
+qr.make(fit=True)
+qr.print_ascii(invert=True)
+" 2>/dev/null || true
+    echo "----------------------------------------------------------------------"
+    echo -e "${GREEN}[✓] Dual-engine active! Use native app or Web PWA as fallback anytime.${NC}"
+    echo -e "${CYAN}${BOLD}======================================================================${NC}\n"
+}
 
 acquire_lock() {
     if command -v flock &>/dev/null; then
@@ -367,7 +425,7 @@ cleanup() {
     fi
     pkill -f "tcp@.*pinggy\.io" 2>/dev/null || true
     if [[ "$HAS_LOCK" = true ]]; then
-        rm -f "${PID_FILE}"
+        rm -f "${PID_FILE}" "${PORT_FILE}"
         release_lock
     fi
     exit 0
@@ -379,6 +437,43 @@ trap 'exit 130' SIGINT SIGTERM
 # Acquire exclusive lock BEFORE credential mutation (--reset) or supervisor startup
 exec 200>"${LOCK_FILE}"
 if ! acquire_lock; then
+    if [[ "$SHOW_BIND_QR" = true ]] && [[ "$RESET_KEYS" = false ]] && [[ -f "${CONFIG_FILE}" ]]; then
+        echo -e "${CYAN}${BOLD}"
+        cat << 'EOF'
+  ______        _   ____                      _
+ |__  /  ___ __| | |  _ \ ___ _ __ ___   ___ | |_ ___
+   / /  / _ \ _` | | |_) / _ \ '_ ` _ \ / _ \| __/ _ \
+  / /__|  __/ (_| | |  _ <  __/ | | | | | (_) | ||  __/
+ /_____\___|\__,_| |_| \_\___|_| |_| |_|\___/ \__\___|
+EOF
+        echo -e "${NC}"
+        echo -e "${BOLD}🛡️  Zed Remote Bunker Tunnel (Fortinet / Firewall Bypass) 🛡️${NC}"
+        echo -e "======================================================================\n"
+        TOPIC=$(python3 -c "import json; d = json.load(open('${CONFIG_FILE}')); print(d.get('ntfy_topic', ''))")
+        KEY_B64=$(python3 -c "import json; d = json.load(open('${CONFIG_FILE}')); print(d.get('key') or d.get('bunker_key', ''))")
+        TOKEN=$(python3 -c "import json; d = json.load(open('${CONFIG_FILE}')); print(d.get('token') or d.get('daemon_token', ''))")
+        if [[ "$PORT_EXPLICIT" = false ]]; then
+            ACTIVE_PORT=""
+            if [[ -f "${PORT_FILE}" ]]; then
+                ACTIVE_PORT=$(tr -d '[:space:]' < "${PORT_FILE}")
+            fi
+            if [[ "${ACTIVE_PORT}" =~ ^[0-9]+$ ]]; then
+                LOCAL_PORT="${ACTIVE_PORT}"
+            else
+                echo -e "${RED}[!] Active supervisor port is unknown (missing ${PORT_FILE}).${NC}"
+                echo -e "${YELLOW}[*] Pass the active port explicitly, e.g.: zed-tunnel bind <PORT>${NC}"
+                exit 1
+            fi
+        fi
+        echo -e "${GREEN}[✓] Loaded persistent device binding:${NC}"
+        echo -e "    Channel Topic: ${CYAN}${TOPIC}${NC}"
+        echo -e "    Target Port:   ${CYAN}${LOCAL_PORT}${NC}"
+        echo -e "    AES-256 Key:   ${CYAN}[REDACTED]${NC}\n"
+        render_bind_qr
+        echo -e "${GREEN}[✓] Tunnel is actively running in the background.${NC}"
+        echo -e "    Check status with: ${CYAN}zed-tunnel -s${NC}"
+        exit 0
+    fi
     echo -e "${RED}[!] Another zed-tunnel supervisor is already running.${NC}"
     echo -e "${YELLOW}[*] Check status with: zed-tunnel -s"
     echo -e "    To stop or reset:  zed-tunnel --stop${NC}"
@@ -386,6 +481,7 @@ if ! acquire_lock; then
 fi
 HAS_LOCK=true
 echo $$ > "${PID_FILE}"
+echo "${LOCAL_PORT}" > "${PORT_FILE}"
 trap cleanup SIGINT SIGTERM EXIT
 
 if [[ "$DAEMON_MODE" = false ]]; then
@@ -447,56 +543,7 @@ fi
 
 # Render pairing payload and Terminal QR Code if binding
 if [[ "$SHOW_BIND_QR" = true ]] && [[ "$DAEMON_MODE" = false ]]; then
-    QR_PAYLOAD=$(python3 -c "
-import json, base64
-
-data = {
-    'version': 'bunker-v2',
-    'ntfy_topic': '${TOPIC}',
-    'key': '${KEY_B64}',
-    'token': '${TOKEN}',
-    'port': ${LOCAL_PORT}
-}
-encoded = base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip('=')
-print('ZEDBUNKER:' + encoded)
-")
-
-    LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-    if [[ -z "${LOCAL_IP}" ]]; then
-        LOCAL_IP="127.0.0.1"
-    fi
-    WEB_BRIDGE_URL="http://${LOCAL_IP}:${LOCAL_PORT}/?token=${TOKEN}"
-
-    echo -e "${CYAN}${BOLD}======================================================================${NC}"
-    echo -e "${YELLOW}${BOLD}🚀 DUAL-ENGINE ACCESS: NATIVE APP OR OPENCODE WEB PWA${NC}"
-    echo -e "${CYAN}${BOLD}======================================================================${NC}"
-    echo -e "${WHITE}${BOLD}[METHOD 1 - Primary] Native Android Companion App${NC}"
-    echo -e "📱 Scan this QR code in the Remote Zed Android App (one-time pairing):"
-    echo "----------------------------------------------------------------------"
-    python3 -c "
-import qrcode
-qr = qrcode.QRCode(border=1)
-qr.add_data('${QR_PAYLOAD}')
-qr.make(fit=True)
-qr.print_ascii(invert=True)
-" 2>/dev/null || echo -e "Install 'qrcode' for ASCII QR rendering: pip install qrcode"
-    echo "----------------------------------------------------------------------"
-    echo -e "Native App Pairing Payload: ${CYAN}${QR_PAYLOAD}${NC}"
-    echo ""
-    echo -e "${WHITE}${BOLD}[METHOD 2 - Fallback] OpenCode Mobile Web Bridge (PWA)${NC}"
-    echo -e "🌐 Open in ANY browser on your phone or install as a PWA (Zero-Config):"
-    echo -e "   URL: ${GREEN}${BOLD}${WEB_BRIDGE_URL}${NC}"
-    echo "----------------------------------------------------------------------"
-    python3 -c "
-import qrcode
-qr = qrcode.QRCode(border=1)
-qr.add_data('${WEB_BRIDGE_URL}')
-qr.make(fit=True)
-qr.print_ascii(invert=True)
-" 2>/dev/null || true
-    echo "----------------------------------------------------------------------"
-    echo -e "${GREEN}[✓] Dual-engine active! Use native app or Web PWA as fallback anytime.${NC}"
-    echo -e "${CYAN}${BOLD}======================================================================${NC}\n"
+    render_bind_qr
 fi
 
 encrypt_and_publish() {

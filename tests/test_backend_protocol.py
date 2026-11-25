@@ -542,16 +542,57 @@ class TestBunkerTunnelSupervisor(unittest.TestCase):
         self.assertIn("--stop", res.stdout)
 
     def test_status_flag_output(self):
-        res = subprocess.run(
-            ["bash", str(self.script_path), "--status"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-        self.assertEqual(res.returncode, 0)
-        self.assertIn("Zed Remote Status:", res.stdout)
-        self.assertIn("Tunnel Process:", res.stdout)
+        for flag in ["--status", "status"]:
+            res = subprocess.run(
+                ["bash", str(self.script_path), flag],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            self.assertEqual(res.returncode, 0)
+            self.assertIn("Zed Remote Status:", res.stdout)
+            self.assertIn("Tunnel Process:", res.stdout)
+
+    def test_bind_subcommand_with_running_supervisor(self):
+        import fcntl
+        import json
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp_home:
+            cfg_dir = Path(tmp_home) / ".config" / "zed-remote"
+            cfg_dir.mkdir(parents=True, exist_ok=True)
+            (cfg_dir / "bunker-session.json").write_text(
+                json.dumps(
+                    {
+                        "ntfy_topic": "test-topic-123",
+                        "key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                        "token": "test-token-123",
+                        "port": 8443,
+                    }
+                )
+            )
+            (cfg_dir / "zed-tunnel.port").write_text("9443\n")
+
+            env = {**os.environ, "HOME": tmp_home}
+            lock_fd = open(cfg_dir / "zed-tunnel.lock", "w")
+            try:
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                for cmd in ["--bind", "bind"]:
+                    res = subprocess.run(
+                        ["bash", str(self.script_path), cmd],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=10,
+                        env=env,
+                    )
+                    self.assertEqual(res.returncode, 0, msg=res.stderr)
+                    self.assertIn("ZEDBUNKER:", res.stdout)
+                    self.assertIn("9443", res.stdout)
+            finally:
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                lock_fd.close()
 
     def test_supervisor_flock_and_cleanup_isolation(self):
         """Simulate supervisor locking, verifying no re-entrant cleanup and clean lock release."""
